@@ -1,0 +1,56 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { verifyToken, extractToken } from '@/lib/auth';
+import { createDomain, getAllDomains } from '@/lib/domains';
+
+export async function GET(req: NextRequest) {
+  try {
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return NextResponse.json({ error: '認証が必須です' }, { status: 401 });
+    }
+
+    const token = extractToken(authHeader);
+    if (!token || !verifyToken(token)) {
+      return NextResponse.json({ error: '無効なトークンです' }, { status: 401 });
+    }
+
+    const domains = getAllDomains();
+    return NextResponse.json(domains, { status: 200 });
+  } catch (err) {
+    console.error('Get domains error:', err);
+    return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return NextResponse.json({ error: '認証が必須です' }, { status: 401 });
+    }
+
+    const token = extractToken(authHeader);
+    if (!token || !verifyToken(token)) {
+      return NextResponse.json({ error: '無効なトークンです' }, { status: 401 });
+    }
+
+    const body = await req.json();
+    if (!body?.name || typeof body.name !== 'string') {
+      return NextResponse.json({ error: 'ドメイン名が必須です' }, { status: 400 });
+    }
+
+    const created = createDomain({
+      name: body.name.trim(),
+      description: body.description,
+      baseSystemPrompt: body.baseSystemPrompt,
+      baseContext: body.baseContext,
+      knowledgeIds: body.knowledgeIds,
+      ttl: body.ttl,
+    });
+
+    return NextResponse.json(created, { status: 201 });
+  } catch (err) {
+    console.error('Create domain error:', err);
+    return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });
+  }
+}
