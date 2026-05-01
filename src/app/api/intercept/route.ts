@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { InjectionInterceptRequest, InjectionInterceptResponse } from '@/types/injection';
-import { getDomainById } from '@/lib/domains';
+import { getDomainById, getKnowledgeById } from '@/lib/domains';
 
 /**
  * 注入インターセプト API
@@ -67,10 +67,38 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // レスポンスを構築
+    // 見出し付き形式で system prompt を構築
+    let injectedSystemPrompt = `【メインドメイン】
+【システムプロンプト】
+${domain.baseSystemPrompt || ''}
+
+【ベースコンテキスト】
+${domain.baseContext || ''}\n`;
+
+    // ドメインに紐付いたナレッジを追加
+    if (Array.isArray(domain.knowledgeIds) && domain.knowledgeIds.length > 0) {
+      for (const knowledgeId of domain.knowledgeIds) {
+        const knowledge = getKnowledgeById(knowledgeId);
+        if (knowledge && knowledge.enabled) {
+          injectedSystemPrompt += `\n====================
+【追加ナレッジ】
+【ナレッジ名】
+${knowledge.name}
+
+【ナレッジプロンプト】
+${knowledge.systemPrompt || ''}
+
+【ナレッジコンテキスト】
+${knowledge.context || ''}
+`;
+        }
+      }
+    }
+
+    // レスポンスを構築（全体を system 側に）
     const response: InjectionInterceptResponse = {
-      injectedSystemPrompt: domain.systemPrompt,
-      injectedUserContext: domain.context,
+      injectedSystemPrompt: injectedSystemPrompt,
+      injectedUserContext: '', // 空（system に統合済み）
       metadata: {
         domainId: domain.id,
         ttl: domain.ttl,

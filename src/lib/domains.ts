@@ -25,6 +25,11 @@ export interface Domain {
   description: string;
   baseSystemPrompt: string;
   baseContext: string;
+  bgUrl?: string;
+  characterName?: string;
+  vrmUrl?: string;
+  stylebertvits2ModelId?: string;
+  stylebertvits2Style?: string;
   knowledgeIds: string[];
   version: string;
   ttl: number;
@@ -190,6 +195,11 @@ function getDefaultStore(): KnowledgeDomainStore {
       description: DEFAULT_DOMAIN_DESCRIPTION,
       baseSystemPrompt: DEFAULT_DOMAIN_BASE_SYSTEM_PROMPT,
       baseContext: DEFAULT_DOMAIN_BASE_CONTEXT,
+      bgUrl: '',
+      characterName: '',
+      vrmUrl: '',
+      stylebertvits2ModelId: '',
+      stylebertvits2Style: '',
       knowledgeIds: [sanitizeId(DEFAULT_KNOWLEDGE_ID, 'default_knowledge')],
       version: '1.0.0',
       ttl: DEFAULT_TTL,
@@ -409,6 +419,11 @@ export function createDomain(input: {
   description?: string;
   baseSystemPrompt?: string;
   baseContext?: string;
+  bgUrl?: string;
+  characterName?: string;
+  vrmUrl?: string;
+  stylebertvits2ModelId?: string;
+  stylebertvits2Style?: string;
   knowledgeIds?: string[];
   ttl?: number;
 }): ResolvedDomain {
@@ -433,6 +448,11 @@ export function createDomain(input: {
     description: input.description || '',
     baseSystemPrompt: input.baseSystemPrompt || '',
     baseContext: input.baseContext || '',
+    bgUrl: input.bgUrl || '',
+    characterName: input.characterName || '',
+    vrmUrl: input.vrmUrl || '',
+    stylebertvits2ModelId: input.stylebertvits2ModelId || '',
+    stylebertvits2Style: input.stylebertvits2Style || '',
     knowledgeIds,
     version: '1.0.0',
     ttl: typeof input.ttl === 'number' && input.ttl > 0 ? input.ttl : DEFAULT_TTL,
@@ -463,9 +483,25 @@ export function deleteDomain(id: string): boolean {
   return true;
 }
 
-export function getDomainOptions(): Array<{ id: string; name: string }> {
+export function getDomainOptions(): Array<{
+  id: string;
+  name: string;
+  bgUrl?: string;
+  characterName?: string;
+  vrmUrl?: string;
+  stylebertvits2ModelId?: string;
+  stylebertvits2Style?: string;
+}> {
   const store = loadStoreFromFile();
-  return store.domains.map((domain) => ({ id: domain.id, name: domain.name }));
+  return store.domains.map((domain) => ({
+    id: domain.id,
+    name: domain.name,
+    bgUrl: domain.bgUrl || '',
+    characterName: domain.characterName || '',
+    vrmUrl: domain.vrmUrl || '',
+    stylebertvits2ModelId: domain.stylebertvits2ModelId || '',
+    stylebertvits2Style: domain.stylebertvits2Style || '',
+  }));
 }
 
 /**

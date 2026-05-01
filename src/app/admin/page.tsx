@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 interface Domain {
   id: string;
@@ -8,6 +8,11 @@ interface Domain {
   description: string;
   baseSystemPrompt: string;
   baseContext: string;
+  bgUrl?: string;
+  characterName?: string;
+  vrmUrl?: string;
+  stylebertvits2ModelId?: string;
+  stylebertvits2Style?: string;
   knowledgeIds: string[];
   systemPrompt: string;
   context: string;
@@ -36,11 +41,46 @@ interface PronunciationRule {
   updatedAt: string;
 }
 
+interface RuntimeModelInfo {
+  backend: string;
+  modelName: string;
+  modelSource: 'amica' | 'env' | 'default';
+  contextLength: number;
+  contextSource: 'api_show' | 'modelfile' | 'metadata' | 'default';
+  amicaConfigFetched: boolean;
+  ollamaFetched: boolean;
+}
+
+interface AssetFile {
+  name: string;
+  url: string;
+}
+
+type AssetType = 'vrm' | 'bgimage';
+
+const DANGER_LINE_PERCENT = 90;
+const WARNING_LINE_PERCENT = 75;
+
+function isCjkChar(char: string): boolean {
+  return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef]/.test(char);
+}
+
+function estimateTokens(text: string): number {
+  if (!text) {
+    return 0;
+  }
+
+  const chars = [...text];
+  const cjkCount = chars.filter((char) => isCjkChar(char)).length;
+  const nonCjkCount = chars.length - cjkCount;
+  return Math.max(1, Math.ceil(cjkCount * 1.2 + nonCjkCount / 4));
+}
+
 export default function AdminPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [knowledges, setKnowledges] = useState<Knowledge[]>([]);
   const [pronunciations, setPronunciations] = useState<PronunciationRule[]>([]);
-  const [activeTab, setActiveTab] = useState<'domain' | 'knowledge' | 'pronunciation'>('domain');
+  const [activeTab, setActiveTab] = useState<'domain' | 'knowledge' | 'asset' | 'pronunciation'>('domain');
   const [selectedDomain, setSelectedDomain] = useState<Domain | null>(null);
   const [selectedKnowledge, setSelectedKnowledge] = useState<Knowledge | null>(null);
   const [selectedPronunciation, setSelectedPronunciation] = useState<PronunciationRule | null>(null);
@@ -50,9 +90,17 @@ export default function AdminPage() {
   const [savingPronunciation, setSavingPronunciation] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [runtimeModelInfo, setRuntimeModelInfo] = useState<RuntimeModelInfo | null>(null);
+  const [runtimeInfoError, setRuntimeInfoError] = useState('');
+  const [runtimeInfoLoading, setRuntimeInfoLoading] = useState(false);
+  const [manualContextLimitInput, setManualContextLimitInput] = useState('');
   const [pronunciationTestInput, setPronunciationTestInput] = useState('');
   const [pronunciationTestDomainId, setPronunciationTestDomainId] = useState('');
   const [pronunciationTestOutput, setPronunciationTestOutput] = useState('');
+  const [vrmAssets, setVrmAssets] = useState<AssetFile[]>([]);
+  const [bgImageAssets, setBgImageAssets] = useState<AssetFile[]>([]);
+  const [uploadingAsset, setUploadingAsset] = useState<AssetType | null>(null);
+  const [deletingAsset, setDeletingAsset] = useState<AssetType | null>(null);
 
   const applyPronunciationRules = (input: string, domainId?: string) => {
     const sortedRules = [...pronunciations]
@@ -67,6 +115,65 @@ export default function AdminPage() {
 
     return output;
   };
+
+  const selectedDomainKnowledges = useMemo(() => {
+    if (!selectedDomain) {
+      return [] as Knowledge[];
+    }
+
+    return selectedDomain.knowledgeIds
+      .map((knowledgeId) => knowledges.find((knowledge) => knowledge.id === knowledgeId))
+      .filter((knowledge): knowledge is Knowledge => Boolean(knowledge));
+  }, [selectedDomain, knowledges]);
+
+  const composedDomainText = useMemo(() => {
+    if (!selectedDomain) {
+      return '';
+    }
+
+    const parts = [
+      selectedDomain.baseSystemPrompt,
+      selectedDomain.baseContext,
+      ...selectedDomainKnowledges.flatMap((knowledge) => [knowledge.systemPrompt, knowledge.context]),
+    ];
+
+    return parts
+      .map((part) => part || '')
+      .filter((part) => part.trim().length > 0)
+      .join('\n\n');
+  }, [selectedDomain, selectedDomainKnowledges]);
+
+  const memoryMetrics = useMemo(() => {
+    const charCount = composedDomainText.length;
+    const utf8Bytes = new TextEncoder().encode(composedDomainText).length;
+    const estimatedTokenCount = estimateTokens(composedDomainText);
+
+    const manualLimit = parseInt(manualContextLimitInput, 10);
+    const selectedContextLimit =
+      Number.isFinite(manualLimit) && manualLimit > 0
+        ? manualLimit
+        : runtimeModelInfo?.contextLength || 8192;
+
+    const usageRate = selectedContextLimit > 0
+      ? (estimatedTokenCount / selectedContextLimit) * 100
+      : 0;
+
+    const warningLevel = usageRate >= DANGER_LINE_PERCENT
+      ? 'danger'
+      : usageRate >= WARNING_LINE_PERCENT
+        ? 'warning'
+        : 'safe';
+
+    return {
+      charCount,
+      utf8Bytes,
+      estimatedTokenCount,
+      contextLimit: selectedContextLimit,
+      usageRate,
+      warningLevel,
+      usingManualLimit: Number.isFinite(manualLimit) && manualLimit > 0,
+    };
+  }, [composedDomainText, runtimeModelInfo, manualContextLimitInput]);
 
   const loadAllData = async (token: string) => {
     const [domainsRes, knowledgesRes, pronunciationsRes] = await Promise.all([
@@ -112,6 +219,179 @@ export default function AdminPage() {
     }
   };
 
+  const loadRuntimeModelInfo = async (token: string) => {
+    try {
+      setRuntimeInfoLoading(true);
+      setRuntimeInfoError('');
+
+      const res = await fetch('/api/runtime-model', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => null);
+        setRuntimeInfoError(error?.error || 'モデル情報の取得に失敗しました');
+        return;
+      }
+
+      const data = await res.json();
+      setRuntimeModelInfo(data);
+    } catch (err) {
+      console.error('Failed to load runtime model info:', err);
+      setRuntimeInfoError('モデル情報の取得中にエラーが発生しました');
+    } finally {
+      setRuntimeInfoLoading(false);
+    }
+  };
+
+  const loadAssetFiles = async (token: string, type: AssetType): Promise<AssetFile[]> => {
+    const response = await fetch(`/api/assets?type=${type}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load ${type} assets`);
+    }
+
+    const payload = await response.json();
+    if (!Array.isArray(payload?.files)) {
+      return [];
+    }
+
+    return payload.files
+      .filter((item: any) => item && typeof item.name === 'string' && typeof item.url === 'string')
+      .map((item: any) => ({ name: item.name, url: item.url }));
+  };
+
+  const loadAllAssets = async (token: string) => {
+    try {
+      const [vrm, bgimage] = await Promise.all([
+        loadAssetFiles(token, 'vrm'),
+        loadAssetFiles(token, 'bgimage'),
+      ]);
+      setVrmAssets(vrm);
+      setBgImageAssets(bgimage);
+    } catch (err) {
+      console.error('Failed to load asset files:', err);
+    }
+  };
+
+  const handleUploadAsset = async (type: AssetType, file: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    try {
+      setUploadingAsset(type);
+      setMessage('');
+
+      const formData = new FormData();
+      formData.append('type', type);
+      formData.append('file', file);
+
+      const response = await fetch('/api/assets', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setMessage(payload?.error || 'ファイルアップロードに失敗しました');
+        return;
+      }
+
+      await loadAllAssets(token);
+
+      const uploadedUrl = payload?.file?.url;
+      if (selectedDomain && typeof uploadedUrl === 'string') {
+        if (type === 'vrm') {
+          setSelectedDomain({ ...selectedDomain, vrmUrl: uploadedUrl });
+        } else {
+          setSelectedDomain({ ...selectedDomain, bgUrl: uploadedUrl });
+        }
+      }
+
+      setMessage(`${type === 'vrm' ? 'VRM' : '背景画像'}をアップロードしました`);
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      console.error(err);
+      setMessage('ファイルアップロード時にエラーが発生しました');
+    } finally {
+      setUploadingAsset(null);
+    }
+  };
+
+  const handleDeleteAsset = async (type: AssetType, url: string | undefined) => {
+    if (!url) {
+      setMessage('削除するファイルを選択してください');
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    if (!window.confirm('選択中のファイルを削除しますか？')) {
+      return;
+    }
+
+    try {
+      setDeletingAsset(type);
+      setMessage('');
+
+      const response = await fetch('/api/assets', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ type, url }),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setMessage(payload?.error || 'ファイル削除に失敗しました');
+        return;
+      }
+
+      await loadAllAssets(token);
+
+      if (selectedDomain) {
+        if (type === 'vrm' && selectedDomain.vrmUrl === url) {
+          setSelectedDomain({ ...selectedDomain, vrmUrl: '' });
+        }
+        if (type === 'bgimage' && selectedDomain.bgUrl === url) {
+          setSelectedDomain({ ...selectedDomain, bgUrl: '' });
+        }
+      }
+
+      setMessage(`${type === 'vrm' ? 'VRM' : '背景画像'}を削除しました`);
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      console.error(err);
+      setMessage('ファイル削除時にエラーが発生しました');
+    } finally {
+      setDeletingAsset(null);
+    }
+  };
+
   useEffect(() => {
     // 認証チェック
     const token = localStorage.getItem('injection_token');
@@ -124,6 +404,8 @@ export default function AdminPage() {
     const fetchData = async () => {
       try {
         await loadAllData(token);
+        await loadRuntimeModelInfo(token);
+        await loadAllAssets(token);
       } catch (err) {
         console.error('Failed to fetch data:', err);
       } finally {
@@ -133,6 +415,15 @@ export default function AdminPage() {
 
     fetchData();
   }, []);
+
+  useEffect(() => {
+    const storedManualContextLimit = localStorage.getItem('arki_manual_context_limit') || '';
+    setManualContextLimitInput(storedManualContextLimit);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('arki_manual_context_limit', manualContextLimitInput);
+  }, [manualContextLimitInput]);
 
   const handleSave = async () => {
     if (!selectedDomain) return;
@@ -543,6 +834,7 @@ export default function AdminPage() {
 
       if (token) {
         await loadAllData(token);
+        await loadAllAssets(token);
       }
       setMessage('フルバックアップを読み込みました');
       setTimeout(() => setMessage(''), 3000);
@@ -610,6 +902,22 @@ export default function AdminPage() {
               }}
             >
               発音辞書
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('asset')}
+              style={{
+                padding: '8px 14px',
+                backgroundColor: activeTab === 'asset' ? '#0066cc' : '#f0f0f0',
+                color: activeTab === 'asset' ? 'white' : '#000',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: activeTab === 'asset' ? 'bold' : 'normal',
+              }}
+            >
+              アセット管理
             </button>
 
             <button
@@ -734,7 +1042,9 @@ export default function AdminPage() {
             <main>
               {selectedDomain ? (
                 <div>
-              <h2>{selectedDomain.name}</h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                <h2>{selectedDomain.name}</h2>
+              </div>
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -823,6 +1133,169 @@ export default function AdminPage() {
                   />
                 </div>
 
+                <div style={{ marginBottom: '15px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px', backgroundColor: '#fafafa' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>Amica アセット/TTS 上書き（ドメイン別）</div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                        キャラクター名
+                      </label>
+                      <input
+                        type="text"
+                        value={selectedDomain.characterName || ''}
+                        onChange={(e) =>
+                          setSelectedDomain({ ...selectedDomain, characterName: e.target.value })
+                        }
+                        placeholder="空欄なら Amica 側の既定名を使用"
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                        背景画像 URL
+                      </label>
+                      <input
+                        type="text"
+                        value={selectedDomain.bgUrl || ''}
+                        onChange={(e) =>
+                          setSelectedDomain({ ...selectedDomain, bgUrl: e.target.value })
+                        }
+                        placeholder="空欄なら Amica 側の既定背景を使用"
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+
+                      <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
+                        <select
+                          value={selectedDomain.bgUrl || ''}
+                          onChange={(e) =>
+                            setSelectedDomain({ ...selectedDomain, bgUrl: e.target.value })
+                          }
+                          style={{
+                            flex: 1,
+                            padding: '8px',
+                            border: '1px solid #ddd',
+                            borderRadius: '4px',
+                            backgroundColor: 'white',
+                          }}
+                        >
+                          <option value="">アップロード済み背景から選択</option>
+                          {bgImageAssets.map((asset) => (
+                            <option key={asset.url} value={asset.url}>
+                              {asset.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      VRM URL
+                    </label>
+                    <input
+                      type="text"
+                      value={selectedDomain.vrmUrl || ''}
+                      onChange={(e) =>
+                        setSelectedDomain({ ...selectedDomain, vrmUrl: e.target.value })
+                      }
+                      placeholder="空欄なら Amica 側の既定VRMを使用"
+                      style={{
+                        width: '100%',
+                        padding: '8px',
+                        border: '1px solid #ddd',
+                        borderRadius: '4px',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+
+                    <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
+                      <select
+                        value={selectedDomain.vrmUrl || ''}
+                        onChange={(e) =>
+                          setSelectedDomain({ ...selectedDomain, vrmUrl: e.target.value })
+                        }
+                        style={{
+                          flex: 1,
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          backgroundColor: 'white',
+                        }}
+                      >
+                        <option value="">アップロード済みVRMから選択</option>
+                        {vrmAssets.map((asset) => (
+                          <option key={asset.url} value={asset.url}>
+                            {asset.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                        Style-Bert-VITS2 モデルID
+                      </label>
+                      <input
+                        type="text"
+                        value={selectedDomain.stylebertvits2ModelId || ''}
+                        onChange={(e) =>
+                          setSelectedDomain({ ...selectedDomain, stylebertvits2ModelId: e.target.value })
+                        }
+                        placeholder="例: 0"
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                        Style-Bert-VITS2 スタイル
+                      </label>
+                      <input
+                        type="text"
+                        value={selectedDomain.stylebertvits2Style || ''}
+                        onChange={(e) =>
+                          setSelectedDomain({ ...selectedDomain, stylebertvits2Style: e.target.value })
+                        }
+                        placeholder="例: Neutral"
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+                    空欄ならドメイン切替時に Amica の既定設定へ戻します。
+                  </div>
+                </div>
+
                 <div style={{ marginBottom: '15px' }}>
                   <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
                     組み合わせるナレッジ
@@ -842,10 +1315,124 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
-                  <div style={{ fontWeight: 'bold', marginBottom: '6px' }}>合成結果プレビュー（保存後反映）</div>
-                  <div style={{ fontSize: '12px', color: '#444', whiteSpace: 'pre-wrap' }}>{selectedDomain.systemPrompt || '(空)'}</div>
+                <div style={{ marginBottom: '15px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                    <div style={{ fontWeight: 'bold' }}>メモリー使用量インジケーター</div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const token = localStorage.getItem('injection_token');
+                        if (!token) {
+                          return;
+                        }
+                        await loadRuntimeModelInfo(token);
+                      }}
+                      disabled={runtimeInfoLoading}
+                      style={{
+                        padding: '6px 10px',
+                        border: 'none',
+                        borderRadius: '4px',
+                        backgroundColor: runtimeInfoLoading ? '#ccc' : '#2563eb',
+                        color: 'white',
+                        cursor: runtimeInfoLoading ? 'default' : 'pointer',
+                        fontSize: '12px',
+                      }}
+                    >
+                      {runtimeInfoLoading ? '取得中...' : 'モデル情報を再取得'}
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div style={{ fontSize: '12px', color: '#444' }}>
+                      <strong>現在モデル:</strong> {runtimeModelInfo?.modelName || '未取得'}
+                      <span style={{ marginLeft: '6px', color: '#666' }}>
+                        ({runtimeModelInfo?.modelSource || 'unknown'})
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#444' }}>
+                      <strong>推定元:</strong> {runtimeModelInfo?.contextSource || 'default'}
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '10px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      最大コンテキスト（手動設定可）
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      placeholder={`${runtimeModelInfo?.contextLength || 8192}`}
+                      value={manualContextLimitInput}
+                      onChange={(e) => setManualContextLimitInput(e.target.value)}
+                      style={{
+                        width: '220px',
+                        padding: '8px',
+                        border: '1px solid #ddd',
+                        borderRadius: '4px',
+                      }}
+                    />
+                    <div style={{ marginTop: '4px', fontSize: '12px', color: '#666' }}>
+                      空欄時は自動取得値を使用（/api/show → Modelfile/metadata解析 → 既定値8K/32K）
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+                    <div>① 文字数: <strong>{memoryMetrics.charCount.toLocaleString()}</strong></div>
+                    <div>② UTF-8バイト数: <strong>{memoryMetrics.utf8Bytes.toLocaleString()}</strong></div>
+                    <div>③ 推定トークン数: <strong>{memoryMetrics.estimatedTokenCount.toLocaleString()}</strong></div>
+                    <div>
+                      ④ 使用率: <strong>{memoryMetrics.usageRate.toFixed(1)}%</strong>
+                      <span style={{ marginLeft: '6px', fontSize: '12px', color: '#666' }}>
+                        / {memoryMetrics.contextLimit.toLocaleString()} tokens
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '8px', height: '10px', backgroundColor: '#eee', borderRadius: '999px', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        width: `${Math.min(100, memoryMetrics.usageRate)}%`,
+                        height: '100%',
+                        transition: 'width 0.2s ease',
+                        backgroundColor:
+                          memoryMetrics.warningLevel === 'danger'
+                            ? '#dc2626'
+                            : memoryMetrics.warningLevel === 'warning'
+                              ? '#f59e0b'
+                              : '#16a34a',
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      fontWeight: 'bold',
+                      color:
+                        memoryMetrics.warningLevel === 'danger'
+                          ? '#b91c1c'
+                          : memoryMetrics.warningLevel === 'warning'
+                            ? '#b45309'
+                            : '#166534',
+                    }}
+                  >
+                    ⑤ 危険ライン警告: {
+                      memoryMetrics.warningLevel === 'danger'
+                        ? `危険（${DANGER_LINE_PERCENT}%超過）: コンテキスト削減推奨`
+                        : memoryMetrics.warningLevel === 'warning'
+                          ? `注意（${WARNING_LINE_PERCENT}%超過）: 余裕が少なくなっています`
+                          : '安全圏'
+                    }
+                  </div>
+
+                  {runtimeInfoError && (
+                    <div style={{ marginTop: '8px', color: '#b91c1c', fontSize: '12px' }}>{runtimeInfoError}</div>
+                  )}
                 </div>
+
+                <details style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+                  <summary style={{ fontWeight: 'bold', cursor: 'pointer' }}>合成結果プレビュー（保存後反映）</summary>
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#444', whiteSpace: 'pre-wrap' }}>{composedDomainText || '(空)'}</div>
+                </details>
 
                 <div style={{ marginBottom: '15px' }}>
                   <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
@@ -865,38 +1452,39 @@ export default function AdminPage() {
                     }}
                   />
                 </div>
+              </form>
 
-                {message && (
-                  <div
-                    style={{
-                      padding: '10px',
-                      marginBottom: '15px',
-                      backgroundColor: message.includes('失敗') ? '#ffebee' : '#e8f5e9',
-                      color: message.includes('失敗') ? '#c62828' : '#2e7d32',
-                      borderRadius: '4px',
-                    }}
-                  >
-                    {message}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={saving}
+              {message && (
+                <div
                   style={{
-                    padding: '10px 20px',
-                    backgroundColor: saving ? '#ccc' : '#4caf50',
-                    color: 'white',
-                    border: 'none',
+                    padding: '10px',
+                    marginBottom: '15px',
+                    backgroundColor: message.includes('失敗') ? '#ffebee' : '#e8f5e9',
+                    color: message.includes('失敗') ? '#c62828' : '#2e7d32',
                     borderRadius: '4px',
-                    cursor: saving ? 'default' : 'pointer',
-                    fontSize: '16px',
-                    fontWeight: 'bold',
                   }}
                 >
-                  {saving ? '保存中...' : '保存'}
-                </button>
-              </form>
+                  {message}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: saving ? '#ccc' : '#4caf50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: saving ? 'default' : 'pointer',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                }}
+              >
+                {saving ? '保存中...' : '保存'}
+              </button>
                 </div>
               ) : (
                 <p>ドメインを選択してください</p>
@@ -1077,6 +1665,166 @@ export default function AdminPage() {
               ) : (
                 <p>ナレッジを選択してください</p>
               )}
+            </main>
+          </>
+        ) : activeTab === 'asset' ? (
+          <>
+            <aside style={{ borderRight: '1px solid #ddd', paddingRight: '20px' }}>
+              <h3>アセット</h3>
+              <div style={{ marginBottom: '8px', fontSize: '13px', color: '#444' }}>
+                VRM: <strong>{vrmAssets.length}</strong>
+              </div>
+              <div style={{ marginBottom: '14px', fontSize: '13px', color: '#444' }}>
+                背景画像: <strong>{bgImageAssets.length}</strong>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  const token = localStorage.getItem('injection_token');
+                  if (!token) {
+                    setMessage('認証情報が見つかりません。再ログインしてください');
+                    return;
+                  }
+                  await loadAllAssets(token);
+                  setMessage('アセット一覧を更新しました');
+                  setTimeout(() => setMessage(''), 3000);
+                }}
+                style={{
+                  padding: '8px 10px',
+                  backgroundColor: '#2563eb',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                一覧を再取得
+              </button>
+            </aside>
+
+            <main>
+              <h2 style={{ marginTop: 0 }}>アセット管理</h2>
+
+              <div style={{ marginBottom: '20px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px' }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>背景画像（bgimage）</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                  <label
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      backgroundColor: uploadingAsset === 'bgimage' ? '#eee' : '#f8f8f8',
+                      cursor: uploadingAsset === 'bgimage' ? 'default' : 'pointer',
+                      fontSize: '12px',
+                    }}
+                  >
+                    {uploadingAsset === 'bgimage' ? 'アップロード中...' : '背景画像をアップロード'}
+                    <input
+                      type="file"
+                      accept=".png,.jpg,.jpeg,.webp,.gif"
+                      disabled={uploadingAsset === 'bgimage'}
+                      style={{ display: 'none' }}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] || null;
+                        event.target.value = '';
+                        void handleUploadAsset('bgimage', file);
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <div style={{ border: '1px solid #eee', borderRadius: '4px', overflow: 'hidden' }}>
+                  {bgImageAssets.length === 0 ? (
+                    <div style={{ padding: '10px', color: '#666' }}>背景画像がありません</div>
+                  ) : (
+                    bgImageAssets.map((asset) => (
+                      <div key={asset.url} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', padding: '10px', borderBottom: '1px solid #f0f0f0' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.name}</div>
+                          <div style={{ fontSize: '12px', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.url}</div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={deletingAsset === 'bgimage'}
+                          onClick={() => void handleDeleteAsset('bgimage', asset.url)}
+                          style={{
+                            padding: '6px 10px',
+                            border: '1px solid #ddd',
+                            borderRadius: '4px',
+                            backgroundColor: deletingAsset === 'bgimage' ? '#eee' : '#fff1f2',
+                            color: deletingAsset === 'bgimage' ? '#999' : '#b91c1c',
+                            cursor: deletingAsset === 'bgimage' ? 'default' : 'pointer',
+                            fontSize: '12px',
+                          }}
+                        >
+                          {deletingAsset === 'bgimage' ? '削除中...' : '削除'}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px' }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>VRM（vrm）</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                  <label
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      backgroundColor: uploadingAsset === 'vrm' ? '#eee' : '#f8f8f8',
+                      cursor: uploadingAsset === 'vrm' ? 'default' : 'pointer',
+                      fontSize: '12px',
+                    }}
+                  >
+                    {uploadingAsset === 'vrm' ? 'アップロード中...' : 'VRMをアップロード'}
+                    <input
+                      type="file"
+                      accept=".vrm"
+                      disabled={uploadingAsset === 'vrm'}
+                      style={{ display: 'none' }}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] || null;
+                        event.target.value = '';
+                        void handleUploadAsset('vrm', file);
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <div style={{ border: '1px solid #eee', borderRadius: '4px', overflow: 'hidden' }}>
+                  {vrmAssets.length === 0 ? (
+                    <div style={{ padding: '10px', color: '#666' }}>VRMファイルがありません</div>
+                  ) : (
+                    vrmAssets.map((asset) => (
+                      <div key={asset.url} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', padding: '10px', borderBottom: '1px solid #f0f0f0' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.name}</div>
+                          <div style={{ fontSize: '12px', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.url}</div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={deletingAsset === 'vrm'}
+                          onClick={() => void handleDeleteAsset('vrm', asset.url)}
+                          style={{
+                            padding: '6px 10px',
+                            border: '1px solid #ddd',
+                            borderRadius: '4px',
+                            backgroundColor: deletingAsset === 'vrm' ? '#eee' : '#fff1f2',
+                            color: deletingAsset === 'vrm' ? '#999' : '#b91c1c',
+                            cursor: deletingAsset === 'vrm' ? 'default' : 'pointer',
+                            fontSize: '12px',
+                          }}
+                        >
+                          {deletingAsset === 'vrm' ? '削除中...' : '削除'}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </main>
           </>
         ) : (

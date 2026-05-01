@@ -44,6 +44,11 @@ export async function POST(req: NextRequest) {
       description: body.description,
       baseSystemPrompt: body.baseSystemPrompt,
       baseContext: body.baseContext,
+      bgUrl: body.bgUrl,
+      characterName: body.characterName,
+      vrmUrl: body.vrmUrl,
+      stylebertvits2ModelId: body.stylebertvits2ModelId,
+      stylebertvits2Style: body.stylebertvits2Style,
       knowledgeIds: body.knowledgeIds,
       ttl: body.ttl,
     });
