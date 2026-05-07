@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getPronunciationSettings } from '@/lib/pronunciation-settings';
 import { getPublicPronunciationRules } from '@/lib/pronunciations';
 
 const AMICA_ORIGIN = process.env.NEXT_PUBLIC_AMICA_ORIGIN || 'http://localhost:3000';
@@ -6,6 +7,7 @@ const AMICA_ORIGIN = process.env.NEXT_PUBLIC_AMICA_ORIGIN || 'http://localhost:3
 export async function GET(req: NextRequest) {
   try {
     const domainId = req.nextUrl.searchParams.get('domainId') || undefined;
+    const settings = getPronunciationSettings();
     const rules = getPublicPronunciationRules(domainId).map((rule) => ({
       id: rule.id,
       from: rule.from,
@@ -17,6 +19,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         rules,
+        settings: {
+          wanaKanaEnabled: settings.wanaKanaEnabled,
+        },
         updatedAt: new Date().toISOString(),
       },
       {
@@ -32,6 +37,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         rules: [],
+        settings: {
+          wanaKanaEnabled: false,
+        },
         updatedAt: new Date().toISOString(),
       },
       {

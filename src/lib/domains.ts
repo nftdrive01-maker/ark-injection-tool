@@ -31,6 +31,7 @@ export interface Domain {
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   knowledgeIds: string[];
+  mcpServerIds?: string[];
   version: string;
   ttl: number;
 }
@@ -164,6 +165,7 @@ function migrateLegacyDomains(legacyDomains: Array<{
     baseSystemPrompt: '',
     baseContext: '',
     knowledgeIds: [`${domain.id}_knowledge`],
+    mcpServerIds: [],
     version: domain.version || '1.0.0',
     ttl: domain.ttl || DEFAULT_TTL,
   }));
@@ -201,6 +203,7 @@ function getDefaultStore(): KnowledgeDomainStore {
       stylebertvits2ModelId: '',
       stylebertvits2Style: '',
       knowledgeIds: [sanitizeId(DEFAULT_KNOWLEDGE_ID, 'default_knowledge')],
+      mcpServerIds: [],
       version: '1.0.0',
       ttl: DEFAULT_TTL,
     },
@@ -425,6 +428,7 @@ export function createDomain(input: {
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   knowledgeIds?: string[];
+  mcpServerIds?: string[];
   ttl?: number;
 }): ResolvedDomain {
   const store = loadStoreFromFile();
@@ -454,6 +458,7 @@ export function createDomain(input: {
     stylebertvits2ModelId: input.stylebertvits2ModelId || '',
     stylebertvits2Style: input.stylebertvits2Style || '',
     knowledgeIds,
+    mcpServerIds: Array.isArray(input.mcpServerIds) ? input.mcpServerIds : [],
     version: '1.0.0',
     ttl: typeof input.ttl === 'number' && input.ttl > 0 ? input.ttl : DEFAULT_TTL,
   };

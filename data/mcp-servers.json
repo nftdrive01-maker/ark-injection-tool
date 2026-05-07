@@ -1,0 +1,74 @@
+{
+  "servers": [
+    {
+      "id": "mcp",
+      "name": "新規MCP",
+      "description": "",
+      "transport": "sse",
+      "config": {
+        "url": "http://localhost:8000/sse"
+      },
+      "enabled": true,
+      "timeout": 10000,
+      "mode": "ai",
+      "ruleRouting": {
+        "enabled": false,
+        "rules": [
+          {
+            "id": "calc_default",
+            "enabled": true,
+            "priority": 100,
+            "keywords": [
+              "計算",
+              "calculate",
+              "calc",
+              "式"
+            ],
+            "toolName": "calculate",
+            "argsTemplate": {
+              "expression": "{{expression}}"
+            }
+          },
+          {
+            "id": "time_default",
+            "enabled": true,
+            "priority": 90,
+            "keywords": [
+              "時刻",
+              "時間",
+              "何時",
+              "time"
+            ],
+            "toolName": "get_current_time"
+          }
+        ]
+      },
+      "aiRouting": {
+        "enabled": true,
+        "provider": "ollama",
+        "model": "qwen2.5:7b",
+        "systemPrompt": "あなたはウェブサイトやファイルの検索・取得を支援するアシスタントです。ユーザーのリクエストに応じて適切なツールを使用してください。",
+        "temperature": 0.7,
+        "maxTokens": 2000,
+        "confidenceThreshold": 0.6,
+        "allowedTools": [
+          "fetch_url",
+          "search_files",
+          "read_file",
+          "search_content",
+          "list_directory",
+          "search_web",
+          "web_search",
+          "search"
+        ],
+        "fallbackTool": "list_directory"
+      },
+      "createdAt": "2026-05-01T15:34:21.882Z",
+      "updatedAt": "2026-05-07T02:39:00.274Z",
+      "lastRuntimeSuccess": false,
+      "lastRuntimeAt": "2026-05-07T02:39:00.274Z",
+      "lastRuntimeError": "SSE error: TypeError: fetch failed: connect ECONNREFUSED ::1:8000, connect ECONNREFUSED 127.0.0.1:8000",
+      "lastRuntimeToolName": "search_web"
+    }
+  ]
+}

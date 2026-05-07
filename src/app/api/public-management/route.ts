@@ -1,0 +1,49 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { extractToken, verifyToken } from '@/lib/auth';
+import {
+  getPublicManagementSettings,
+  updatePublicManagementSettings,
+} from '@/lib/public-management';
+
+export async function GET(req: NextRequest) {
+  try {
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return NextResponse.json({ error: '認証が必須です' }, { status: 401 });
+    }
+
+    const token = extractToken(authHeader);
+    if (!token || !verifyToken(token)) {
+      return NextResponse.json({ error: '無効なトークンです' }, { status: 401 });
+    }
+
+    return NextResponse.json(getPublicManagementSettings(), { status: 200 });
+  } catch (err) {
+    console.error('Get public management settings error:', err);
+    return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return NextResponse.json({ error: '認証が必須です' }, { status: 401 });
+    }
+
+    const token = extractToken(authHeader);
+    if (!token || !verifyToken(token)) {
+      return NextResponse.json({ error: '無効なトークンです' }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const updated = updatePublicManagementSettings({
+      maxConcurrentSessions: body?.maxConcurrentSessions,
+    });
+
+    return NextResponse.json(updated, { status: 200 });
+  } catch (err) {
+    console.error('Update public management settings error:', err);
+    return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });
+  }
+}

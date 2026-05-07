@@ -94,5 +94,29 @@
     "enabled": true,
     "priority": 100,
     "updatedAt": "2026-04-28T02:03:12.562Z"
+  },
+  {
+    "id": "youtube",
+    "from": "YouTube",
+    "to": "ユーチューブ",
+    "enabled": true,
+    "priority": 100,
+    "updatedAt": "2026-05-03T10:54:02.532Z"
+  },
+  {
+    "id": "chronicle",
+    "from": "CHRONICLE",
+    "to": "くろにくる",
+    "enabled": true,
+    "priority": 100,
+    "updatedAt": "2026-05-03T12:59:10.431Z"
+  },
+  {
+    "id": "chronoth",
+    "from": "CHRONOTH",
+    "to": "クロノス",
+    "enabled": true,
+    "priority": 100,
+    "updatedAt": "2026-05-03T12:59:23.395Z"
   }
 ]

@@ -49,6 +49,18 @@ export interface InjectionInterceptResponse {
 
     /** バージョン識別（キャッシュヒット判定用） */
     version?: string;
+
+    /** MCPを実行したか */
+    mcpUsed?: boolean;
+
+    /** 実行に利用したMCPサーバーID */
+    mcpServerId?: string;
+
+    /** 実行したMCPツール名 */
+    mcpToolName?: string;
+
+    /** MCP実行時のエラー（fail-open時の診断用） */
+    mcpError?: string;
   };
 
   /** エラー時のメッセージ（内部ログ用） */
