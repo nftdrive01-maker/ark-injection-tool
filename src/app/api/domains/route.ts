@@ -46,10 +46,15 @@ export async function POST(req: NextRequest) {
       baseContext: body.baseContext,
       bgUrl: body.bgUrl,
       characterName: body.characterName,
+      vrmEnabled: body.vrmEnabled,
       vrmUrl: body.vrmUrl,
+      imageAvatarIdleUrl: body.imageAvatarIdleUrl,
+      imageAvatarTalkUrl: body.imageAvatarTalkUrl,
+      imageAvatarTalkIntervalMs: body.imageAvatarTalkIntervalMs,
       stylebertvits2ModelId: body.stylebertvits2ModelId,
       stylebertvits2Style: body.stylebertvits2Style,
       knowledgeIds: body.knowledgeIds,
+      chronicleIds: body.chronicleIds,
       ttl: body.ttl,
     });
 

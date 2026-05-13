@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPronunciationSettings } from '@/lib/pronunciation-settings';
 import { getPublicPronunciationRules } from '@/lib/pronunciations';
 
-const AMICA_ORIGIN = process.env.NEXT_PUBLIC_AMICA_ORIGIN || 'http://localhost:3000';
+const CLIENT_ORIGIN = process.env.NEXT_PUBLIC_AMICA_ORIGIN || 'http://localhost:3000';
 
 export async function GET(req: NextRequest) {
   try {
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
       {
         status: 200,
         headers: {
-          'Access-Control-Allow-Origin': AMICA_ORIGIN,
+          'Access-Control-Allow-Origin': CLIENT_ORIGIN,
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type',
         },
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
       {
         status: 200,
         headers: {
-          'Access-Control-Allow-Origin': AMICA_ORIGIN,
+          'Access-Control-Allow-Origin': CLIENT_ORIGIN,
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type',
         },
@@ -58,7 +58,7 @@ export async function OPTIONS() {
   return new NextResponse(null, {
     status: 200,
     headers: {
-      'Access-Control-Allow-Origin': AMICA_ORIGIN,
+      'Access-Control-Allow-Origin': CLIENT_ORIGIN,
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
       'Access-Control-Max-Age': '86400',

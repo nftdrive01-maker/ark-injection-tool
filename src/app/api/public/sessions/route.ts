@@ -7,10 +7,10 @@ import {
   getSessionStatus,
 } from '@/lib/sessions';
 
-const AMICA_ORIGIN = process.env.NEXT_PUBLIC_AMICA_ORIGIN || 'http://localhost:3000';
+const CLIENT_ORIGIN = process.env.NEXT_PUBLIC_AMICA_ORIGIN || 'http://localhost:3000';
 
 const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': AMICA_ORIGIN,
+  'Access-Control-Allow-Origin': CLIENT_ORIGIN,
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };

@@ -54,7 +54,7 @@ export default function Home() {
           </div>
           <div style={{ backgroundColor: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '12px 14px' }}>
             <div style={{ fontSize: '12px', color: '#6b7280' }}>接続先</div>
-            <div style={{ marginTop: '4px', fontWeight: 700, color: '#111827' }}>Amica Integration</div>
+            <div style={{ marginTop: '4px', fontWeight: 700, color: '#111827' }}>クライアント連携</div>
           </div>
         </div>
 

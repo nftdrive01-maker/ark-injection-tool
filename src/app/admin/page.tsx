@@ -7,19 +7,39 @@ interface Domain {
   id: string;
   name: string;
   description: string;
+  enabled?: boolean;
   baseSystemPrompt: string;
   baseContext: string;
   bgUrl?: string;
   characterName?: string;
+  vrmEnabled?: boolean;
   vrmUrl?: string;
+  imageAvatarIdleUrl?: string;
+  imageAvatarTalkUrl?: string;
+  imageAvatarTalkIntervalMs?: number;
+  ttsMuted?: boolean;
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   knowledgeIds: string[];
   mcpServerIds?: string[];
+  chronicleIds?: string[];
   systemPrompt: string;
   context: string;
   version: string;
   ttl: number;
+}
+
+interface Chronicle {
+  id: string;
+  name: string;
+  description: string;
+  host: string;
+  apiPort: number;
+  tcpPort: number;
+  enabled: boolean;
+  lastDiscoveredAt?: string;
+  lastConnectedAt?: string;
+  updatedAt: string;
 }
 
 interface Knowledge {
@@ -31,6 +51,19 @@ interface Knowledge {
   enabled: boolean;
   priority: number;
   updatedAt: string;
+}
+
+interface Memory {
+  id: string | number;
+  name: string;
+  description: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  block_height?: number;
+  network?: string;
+  summary?: string;
+  item_count?: number;
 }
 
 interface PronunciationRule {
@@ -131,6 +164,49 @@ const WARNING_LINE_PERCENT = 75;
 const SELECTED_DOMAIN_STORAGE_KEY = 'arki_selected_domain_id';
 const LATIN_WORD_PATTERN = /https?:\/\/\S+|www\.\S+|[A-Za-z][A-Za-z'-]*/g;
 
+interface DomainPromptTemplate {
+  id: string;
+  label: string;
+  description: string;
+  content: string;
+}
+
+const DOMAIN_PROMPT_TEMPLATES: DomainPromptTemplate[] = [
+  {
+    id: 'generic-concierge',
+    label: '汎用コンシェルジュ',
+    description: '業種を問わず使える案内AI向けテンプレート',
+    content: `あなたは「{{assistant_name}}」です。{{organization_name}} に関する案内・相談対応を行うコンシェルジュとして振る舞ってください。\n\n# 最優先ルール\n- 回答は、アタッチされたナレッジ（公式情報）を最優先で根拠にする。\n- ナレッジにない情報は断定しない。必要に応じて「未確認」と明示する。\n- 事実と推測を分けて説明する。\n\n# 応答スタイル\n- 丁寧で安心感のある、です・ます調で回答する。\n- 最初に結論を短く示し、その後に必要な詳細を述べる。\n- 専門用語は可能な限り平易な表現に言い換える。\n\n# 案内方針\n- ユーザーの目的を整理し、次に取る行動を具体的に提示する。\n- 日時・場所・手続き・連絡先など実務情報を優先する。\n- 不足情報がある場合は確認質問を1〜2個だけ行う。`,
+  },
+  {
+    id: 'school-concierge',
+    label: '学校案内コンシェルジュ',
+    description: '学校紹介・入試・行事案内向けテンプレート',
+    content: `あなたは「{{assistant_name}}」です。{{organization_name}} の学校案内コンシェルジュとして、受験生・保護者・在校生・卒業生の質問に回答してください。\n\n# 最優先ルール\n- 回答は、アタッチされた学校ナレッジ（公式サイト由来）を優先する。\n- 募集要項・日程・費用・制度は、記載がある場合のみ回答し、未記載は要確認とする。\n\n# 案内方針\n- 質問意図を把握し、対象者（受験生/保護者/在校生/卒業生）に合わせて案内する。\n- 入試、オープンスクール、コース、部活動、進路、各種証明書の案内を優先する。\n- 緊急連絡や手続きは、窓口・連絡先・必要書類を分かりやすく提示する。\n\n# 応答スタイル\n- 親しみやすく丁寧な、です・ます調で回答する。\n- まず結論、次に根拠、最後に次アクションの順で回答する。`,
+  },
+  {
+    id: 'company-concierge',
+    label: '企業案内コンシェルジュ',
+    description: '企業紹介・製品サービス案内向けテンプレート',
+    content: `あなたは「{{assistant_name}}」です。{{organization_name}} の企業案内コンシェルジュとして、会社情報・製品サービス・採用・お問い合わせに関する案内を行ってください。\n\n# 最優先ルール\n- 公式ナレッジに基づいて回答する。\n- 未確認情報は断定せず、確認方法を提示する。\n\n# 案内方針\n- ユーザーの目的（購入検討/導入相談/採用/問い合わせ）を明確化する。\n- 必要な情報を簡潔に整理し、関連ページや窓口につなぐ。\n- 価格・契約・法務に関する事項は、公式窓口確認を促す。\n\n# 応答スタイル\n- 簡潔・明瞭・丁寧に回答する。\n- 箇条書きで比較・選択肢を提示し、次の行動を示す。`,
+  },
+  {
+    id: 'public-concierge',
+    label: '自治体・公共案内コンシェルジュ',
+    description: '行政手続き・公共サービス案内向けテンプレート',
+    content: `あなたは「{{assistant_name}}」です。{{organization_name}} の公共案内コンシェルジュとして、住民向けの手続き・制度・窓口案内を支援してください。\n\n# 最優先ルール\n- 公式ナレッジを根拠に回答する。\n- 制度の要件・期限・必要書類は、根拠があるもののみ明示する。\n\n# 案内方針\n- 目的を確認し、対象手続きの概要、必要書類、申請先、受付時間を案内する。\n- ケースにより条件が異なる場合は、該当条件を確認質問で絞り込む。\n- 重要な判断が必要な場合は公式窓口での最終確認を促す。\n\n# 応答スタイル\n- 正確性を重視し、簡潔で丁寧に説明する。\n- 結論→根拠→次アクションの順で回答する。`,
+  },
+];
+
+function renderDomainPromptTemplate(template: DomainPromptTemplate, domain: Domain): string {
+  const assistantName = (domain.characterName || '').trim() || `${domain.name}コンシェルジュ`;
+  const organizationName = (domain.name || '').trim() || '対象組織';
+
+  return template.content
+    .replace(/\{\{assistant_name\}\}/g, assistantName)
+    .replace(/\{\{organization_name\}\}/g, organizationName);
+}
+
 function applyWanaKanaFallback(input: string, enabled: boolean): string {
   if (!enabled || !input) {
     return input;
@@ -166,15 +242,22 @@ function estimateTokens(text: string): number {
 }
 
 export default function AdminPage() {
+  const showDomainSiteAnalysis = false;
+
   const [domains, setDomains] = useState<Domain[]>([]);
   const [knowledges, setKnowledges] = useState<Knowledge[]>([]);
   const [pronunciations, setPronunciations] = useState<PronunciationRule[]>([]);
   const [pronunciationSettings, setPronunciationSettings] = useState<PronunciationSettings>({
     wanaKanaEnabled: false,
   });
-  const [activeTab, setActiveTab] = useState<'domain' | 'knowledge' | 'asset' | 'pronunciation' | 'public' | 'mcp'>('domain');
+  const [activeTab, setActiveTab] = useState<'domain' | 'knowledge' | 'chronicle' | 'asset' | 'pronunciation' | 'public' | 'mcp'>('domain');
   const [selectedDomain, setSelectedDomain] = useState<Domain | null>(null);
   const [selectedKnowledge, setSelectedKnowledge] = useState<Knowledge | null>(null);
+  const [chronicles, setChronicles] = useState<Chronicle[]>([]);
+  const [selectedChronicle, setSelectedChronicle] = useState<Chronicle | null>(null);
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [loadingMemories, setLoadingMemories] = useState(false);
+  const [updatingMemoryId, setUpdatingMemoryId] = useState<string | number | null>(null);
   const [selectedPronunciation, setSelectedPronunciation] = useState<PronunciationRule | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -222,6 +305,29 @@ export default function AdminPage() {
   const [mcpImportUrl, setMcpImportUrl] = useState('');
   const [mcpImporting, setMcpImporting] = useState(false);
   const [mcpImportError, setMcpImportError] = useState('');
+  const [chronicleDiscoverHost, setChronicleDiscoverHost] = useState('127.0.0.1');
+  const [chronicleDiscoverApiPort, setChronicleDiscoverApiPort] = useState(8000);
+  const [chronicleDiscoverTcpPort, setChronicleDiscoverTcpPort] = useState(8001);
+  const [chronicleBusy, setChronicleBusy] = useState(false);
+  const [chronicleError, setChronicleError] = useState('');
+
+  const [crawlUrl, setCrawlUrl] = useState('');
+  const [crawlMaxPages, setCrawlMaxPages] = useState(10);
+  const [crawling, setCrawling] = useState(false);
+  const [crawlError, setCrawlError] = useState('');
+  const [crawlSuccess, setCrawlSuccess] = useState('');
+
+  const [knowledgeCrawlUrl, setKnowledgeCrawlUrl] = useState('');
+  const [knowledgeCrawlName, setKnowledgeCrawlName] = useState('');
+  const [knowledgeCrawlMaxPages, setKnowledgeCrawlMaxPages] = useState(10);
+  const [knowledgeCrawlMcpServerId, setKnowledgeCrawlMcpServerId] = useState('');
+  const [knowledgeAttachDomainId, setKnowledgeAttachDomainId] = useState('');
+  const [knowledgeCrawling, setKnowledgeCrawling] = useState(false);
+  const [knowledgeCrawlError, setKnowledgeCrawlError] = useState('');
+  const [knowledgeCrawlSuccess, setKnowledgeCrawlSuccess] = useState('');
+  const [selectedDomainPromptTemplateId, setSelectedDomainPromptTemplateId] = useState<string>(
+    DOMAIN_PROMPT_TEMPLATES[0].id
+  );
 
   const normalizeAllowedTools = (tools: string[] | undefined): string[] => {
     if (!Array.isArray(tools)) {
@@ -354,17 +460,23 @@ export default function AdminPage() {
   }, [composedDomainText, runtimeModelInfo, manualContextLimitInput]);
 
   const loadAllData = async (token: string) => {
-    const [domainsRes, knowledgesRes, pronunciationsRes, pronunciationSettingsRes] = await Promise.all([
+    const [domainsRes, knowledgesRes, chroniclesRes, pronunciationsRes, pronunciationSettingsRes, memoriesRes] = await Promise.all([
       fetch('/api/domains', {
         headers: { Authorization: `Bearer ${token}` },
       }),
       fetch('/api/knowledges', {
         headers: { Authorization: `Bearer ${token}` },
       }),
+      fetch('/api/chronicles', {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
       fetch('/api/pronunciations', {
         headers: { Authorization: `Bearer ${token}` },
       }),
       fetch('/api/pronunciations/settings', {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      fetch('/api/memories', {
         headers: { Authorization: `Bearer ${token}` },
       }),
     ]);
@@ -391,6 +503,14 @@ export default function AdminPage() {
       }
     }
 
+    if (chroniclesRes.ok) {
+      const chronicleData = await chroniclesRes.json();
+      setChronicles(chronicleData);
+      if (chronicleData.length > 0) {
+        setSelectedChronicle(chronicleData[0]);
+      }
+    }
+
     if (pronunciationsRes.ok) {
       const pronunciationData = await pronunciationsRes.json();
       setPronunciations(pronunciationData);
@@ -407,9 +527,15 @@ export default function AdminPage() {
       });
     }
 
+    if (memoriesRes.ok) {
+      const memoriesData = await memoriesRes.json();
+      setMemories(Array.isArray(memoriesData?.memories) ? memoriesData.memories : []);
+    }
+
     if (
       domainsRes.status === 401 ||
       knowledgesRes.status === 401 ||
+      chroniclesRes.status === 401 ||
       pronunciationsRes.status === 401 ||
       pronunciationSettingsRes.status === 401
     ) {
@@ -419,7 +545,66 @@ export default function AdminPage() {
     }
   };
 
-  const loadRuntimeModelInfo = async (token: string) => {
+  const loadMemories = async (token: string, chronicleId?: string) => {
+    try {
+      setLoadingMemories(true);
+      const query = chronicleId 
+        ? `?chronicleId=${encodeURIComponent(chronicleId)}&export=true` 
+        : '?export=true';
+      const memoriesRes = await fetch(`/api/memories${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (memoriesRes.ok) {
+        const memoriesData = await memoriesRes.json();
+        setMemories(Array.isArray(memoriesData?.memories) ? memoriesData.memories : []);
+      }
+    } catch (err) {
+      console.error('Failed to load memories:', err);
+    } finally {
+      setLoadingMemories(false);
+    }
+  };
+
+  const handleToggleMemoryActive = async (memoryId: string | number, active: boolean) => {
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    try {
+      setUpdatingMemoryId(memoryId);
+      const res = await fetch('/api/memories', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          memoryId,
+          active,
+          chronicleId: selectedChronicle?.id,
+        }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => null);
+        setMessage(error?.error || 'メモリー状態の更新に失敗しました');
+        return;
+      }
+
+      await loadMemories(token, selectedChronicle?.id);
+      setMessage(active ? 'メモリーを有効にしました' : 'メモリーを無効にしました');
+    } catch (err) {
+      console.error('Failed to update memory:', err);
+      setMessage('メモリー状態の更新中にエラーが発生しました');
+    } finally {
+      setUpdatingMemoryId(null);
+    }
+  };
+
+   const loadRuntimeModelInfo = async (token: string) => {
     try {
       setRuntimeInfoLoading(true);
       setRuntimeInfoError('');
@@ -796,6 +981,259 @@ export default function AdminPage() {
     }
   };
 
+  const handleCrawlSite = async () => {
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setCrawlError('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+    if (!selectedDomain) {
+      setCrawlError('ドメインを選択してください');
+      return;
+    }
+    if (!crawlUrl.trim() || !crawlUrl.startsWith('http')) {
+      setCrawlError('有効なURLを入力してください（http:// または https://）');
+      return;
+    }
+    if (!Number.isFinite(crawlMaxPages) || crawlMaxPages < 1 || crawlMaxPages > 30) {
+      setCrawlError('最大ページ数は1〜30で指定してください');
+      return;
+    }
+    const mcpServerId = selectedDomain.mcpServerIds?.[0];
+    if (!mcpServerId) {
+      setCrawlError('このドメインにMCPサーバーが割り当てられていません');
+      return;
+    }
+
+    setCrawling(true);
+    setCrawlError('');
+    setCrawlSuccess('');
+    try {
+      const res = await fetch(`/api/domains/${selectedDomain.id}/crawl`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ url: crawlUrl.trim(), mcpServerId, maxPages: crawlMaxPages }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        const detail = typeof err?.details === 'string' && err.details.trim().length > 0
+          ? ` (${err.details})`
+          : '';
+        setCrawlError((err?.error || '解析に失敗しました') + detail);
+        return;
+      }
+
+      const payload = await res.json();
+      setSelectedDomain(payload.domain);
+      setDomains((prev: Domain[]) => prev.map((d: Domain) => (d.id === payload.domain.id ? payload.domain : d)));
+      setCrawlSuccess(`解析完了: ${payload.crawlSummary.pageCount}ページ取得（上限 ${crawlMaxPages}） → ベースシステムプロンプトに保存しました`);
+      setCrawlUrl('');
+    } catch (err) {
+      setCrawlError(err instanceof Error ? err.message : '解析中にエラーが発生しました');
+    } finally {
+      setCrawling(false);
+    }
+  };
+
+  const handleCreateKnowledgeFromSite = async () => {
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setKnowledgeCrawlError('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    if (!knowledgeCrawlUrl.trim() || !knowledgeCrawlUrl.startsWith('http')) {
+      setKnowledgeCrawlError('有効なURLを入力してください（http:// または https://）');
+      return;
+    }
+
+    if (!Number.isFinite(knowledgeCrawlMaxPages) || knowledgeCrawlMaxPages < 1 || knowledgeCrawlMaxPages > 30) {
+      setKnowledgeCrawlError('最大ページ数は1〜30で指定してください');
+      return;
+    }
+
+    if (!knowledgeCrawlMcpServerId) {
+      setKnowledgeCrawlError('MCPサーバーを選択してください');
+      return;
+    }
+
+    setKnowledgeCrawling(true);
+    setKnowledgeCrawlError('');
+    setKnowledgeCrawlSuccess('');
+
+    try {
+      const res = await fetch('/api/knowledges/crawl', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          url: knowledgeCrawlUrl.trim(),
+          mcpServerId: knowledgeCrawlMcpServerId,
+          maxPages: knowledgeCrawlMaxPages,
+          knowledgeName: knowledgeCrawlName.trim() || undefined,
+          domainId: knowledgeAttachDomainId || undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        const detail = typeof err?.details === 'string' && err.details.trim().length > 0
+          ? ` (${err.details})`
+          : '';
+        setKnowledgeCrawlError((err?.error || 'ナレッジ生成に失敗しました') + detail);
+        return;
+      }
+
+      const payload = await res.json();
+      setKnowledges((prev: Knowledge[]) => {
+        const filtered = prev.filter((k: Knowledge) => k.id !== payload.knowledge.id);
+        return [...filtered, payload.knowledge];
+      });
+      setSelectedKnowledge(payload.knowledge);
+
+      if (payload.domain) {
+        setDomains((prev: Domain[]) => prev.map((d: Domain) => (d.id === payload.domain.id ? payload.domain : d)));
+        if (selectedDomain?.id === payload.domain.id) {
+          setSelectedDomain(payload.domain);
+        }
+      }
+
+      const attachedText = payload.domain ? ` / ドメイン「${payload.domain.name}」へアタッチ済み` : '';
+      setKnowledgeCrawlSuccess(
+        `ナレッジ作成完了: ${payload.knowledge.name} (${payload.crawlSummary.pageCount}ページ取得)${attachedText}`
+      );
+    } catch (err) {
+      setKnowledgeCrawlError(err instanceof Error ? err.message : 'ナレッジ生成中にエラーが発生しました');
+    } finally {
+      setKnowledgeCrawling(false);
+    }
+  };
+
+  const handleRefreshKnowledgeFromSite = async () => {
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setKnowledgeCrawlError('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    if (!selectedKnowledge) {
+      setKnowledgeCrawlError('更新するナレッジを選択してください');
+      return;
+    }
+
+    if (!knowledgeCrawlUrl.trim() || !knowledgeCrawlUrl.startsWith('http')) {
+      setKnowledgeCrawlError('有効なURLを入力してください（http:// または https://）');
+      return;
+    }
+
+    if (!Number.isFinite(knowledgeCrawlMaxPages) || knowledgeCrawlMaxPages < 1 || knowledgeCrawlMaxPages > 30) {
+      setKnowledgeCrawlError('最大ページ数は1〜30で指定してください');
+      return;
+    }
+
+    if (!knowledgeCrawlMcpServerId) {
+      setKnowledgeCrawlError('MCPサーバーを選択してください');
+      return;
+    }
+
+    setKnowledgeCrawling(true);
+    setKnowledgeCrawlError('');
+    setKnowledgeCrawlSuccess('');
+
+    try {
+      const res = await fetch('/api/knowledges/crawl', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          url: knowledgeCrawlUrl.trim(),
+          mcpServerId: knowledgeCrawlMcpServerId,
+          maxPages: knowledgeCrawlMaxPages,
+          knowledgeName: knowledgeCrawlName.trim() || selectedKnowledge.name,
+          knowledgeId: selectedKnowledge.id,
+          domainId: knowledgeAttachDomainId || undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        const detail = typeof err?.details === 'string' && err.details.trim().length > 0
+          ? ` (${err.details})`
+          : '';
+        setKnowledgeCrawlError((err?.error || 'ナレッジ更新に失敗しました') + detail);
+        return;
+      }
+
+      const payload = await res.json();
+      setKnowledges((prev: Knowledge[]) =>
+        prev.map((k: Knowledge) => (k.id === payload.knowledge.id ? payload.knowledge : k))
+      );
+      setSelectedKnowledge(payload.knowledge);
+
+      if (payload.domain) {
+        setDomains((prev: Domain[]) => prev.map((d: Domain) => (d.id === payload.domain.id ? payload.domain : d)));
+        if (selectedDomain?.id === payload.domain.id) {
+          setSelectedDomain(payload.domain);
+        }
+      }
+
+      const attachedText = payload.domain ? ` / ドメイン「${payload.domain.name}」へアタッチ済み` : '';
+      setKnowledgeCrawlSuccess(
+        `ナレッジ更新完了: ${payload.knowledge.name} (${payload.crawlSummary.pageCount}ページ取得)${attachedText}`
+      );
+    } catch (err) {
+      setKnowledgeCrawlError(err instanceof Error ? err.message : 'ナレッジ更新中にエラーが発生しました');
+    } finally {
+      setKnowledgeCrawling(false);
+    }
+  };
+
+  const applyDomainPromptTemplate = (mode: 'replace' | 'append') => {
+    if (!selectedDomain) {
+      setMessage('ドメインを選択してください');
+      return;
+    }
+
+    const template = DOMAIN_PROMPT_TEMPLATES.find((item) => item.id === selectedDomainPromptTemplateId);
+    if (!template) {
+      setMessage('テンプレートが見つかりません');
+      return;
+    }
+
+    const rendered = renderDomainPromptTemplate(template, selectedDomain);
+    const nextPrompt =
+      mode === 'append' && selectedDomain.baseSystemPrompt.trim().length > 0
+        ? `${selectedDomain.baseSystemPrompt}\n\n${rendered}`
+        : rendered;
+
+    setSelectedDomain({
+      ...selectedDomain,
+      baseSystemPrompt: nextPrompt,
+    });
+    setMessage(`テンプレート「${template.label}」を${mode === 'append' ? '追記' : '上書き'}適用しました`);
+  };
+
+  useEffect(() => {
+    if (!knowledgeCrawlMcpServerId) {
+      const preferredId = selectedDomain?.mcpServerIds?.[0] || mcpServers[0]?.id || '';
+      if (preferredId) {
+        setKnowledgeCrawlMcpServerId(preferredId);
+      }
+    }
+
+    if (!knowledgeAttachDomainId && selectedDomain?.id) {
+      setKnowledgeAttachDomainId(selectedDomain.id);
+    }
+  }, [selectedDomain, mcpServers, knowledgeCrawlMcpServerId, knowledgeAttachDomainId]);
+
   const handleImportMcpServer = async () => {
     const token = localStorage.getItem('injection_token');
     if (!token) {
@@ -1109,7 +1547,7 @@ export default function AdminPage() {
         }
       }
 
-      setMessage(`${type === 'vrm' ? 'VRM' : '背景画像'}をアップロードしました`);
+      setMessage(`${type === 'vrm' ? 'VRM' : '画像'}をアップロードしました`);
       setTimeout(() => setMessage(''), 3000);
     } catch (err) {
       console.error(err);
@@ -1165,7 +1603,7 @@ export default function AdminPage() {
         }
       }
 
-      setMessage(`${type === 'vrm' ? 'VRM' : '背景画像'}を削除しました`);
+      setMessage(`${type === 'vrm' ? 'VRM' : '画像'}を削除しました`);
       setTimeout(() => setMessage(''), 3000);
     } catch (err) {
       console.error(err);
@@ -1201,6 +1639,15 @@ export default function AdminPage() {
 
     fetchData();
   }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem('injection_token');
+    if (!token || activeTab !== 'chronicle' || !selectedChronicle?.id) {
+      return;
+    }
+
+    loadMemories(token, selectedChronicle.id);
+  }, [activeTab, selectedChronicle?.id]);
 
   useEffect(() => {
     const storedManualContextLimit = localStorage.getItem('arki_manual_context_limit') || '';
@@ -1628,6 +2075,220 @@ export default function AdminPage() {
     setSelectedDomain({ ...selectedDomain, knowledgeIds });
   };
 
+  const toggleDomainChronicle = (chronicleId: string) => {
+    if (!selectedDomain) return;
+
+    const current = selectedDomain.chronicleIds || [];
+    const exists = current.includes(chronicleId);
+    const chronicleIds = exists
+      ? current.filter((id) => id !== chronicleId)
+      : [...current, chronicleId];
+
+    setSelectedDomain({ ...selectedDomain, chronicleIds });
+  };
+
+  const toggleDomainMemory = (memoryId: string | number) => {
+    if (!selectedDomain) return;
+
+    const current = selectedDomain.memoryIds || [];
+    const memoryIdStr = String(memoryId);
+    const exists = current.includes(memoryIdStr);
+    const memoryIds = exists
+      ? current.filter((id) => id !== memoryIdStr)
+      : [...current, memoryIdStr];
+
+    setSelectedDomain({ ...selectedDomain, memoryIds });
+  };
+
+  const handleCreateChronicle = async () => {
+    const input = window.prompt('新しいCHRONICLE名を入力してください');
+    if (!input || input.trim() === '') {
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    try {
+      setChronicleBusy(true);
+      setChronicleError('');
+      const res = await fetch('/api/chronicles', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: input.trim(),
+          description: '',
+          host: chronicleDiscoverHost,
+          apiPort: chronicleDiscoverApiPort,
+          tcpPort: chronicleDiscoverTcpPort,
+          enabled: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => null);
+        setChronicleError(error?.error || 'CHRONICLE追加に失敗しました');
+        return;
+      }
+
+      const created = await res.json();
+      setChronicles((prev) => [...prev, created]);
+      setSelectedChronicle(created);
+      setMessage('CHRONICLEを追加しました');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      setChronicleError('CHRONICLE追加時にエラーが発生しました');
+    } finally {
+      setChronicleBusy(false);
+    }
+  };
+
+  const handleSaveChronicle = async () => {
+    if (!selectedChronicle) {
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    try {
+      setChronicleBusy(true);
+      setChronicleError('');
+
+      const res = await fetch(`/api/chronicles/${selectedChronicle.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(selectedChronicle),
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => null);
+        setChronicleError(error?.error || 'CHRONICLE保存に失敗しました');
+        return;
+      }
+
+      const updated = await res.json();
+      setChronicles((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setSelectedChronicle(updated);
+      setMessage('CHRONICLEを保存しました');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      setChronicleError('CHRONICLE保存時にエラーが発生しました');
+    } finally {
+      setChronicleBusy(false);
+    }
+  };
+
+  const handleDeleteChronicle = async () => {
+    if (!selectedChronicle) {
+      return;
+    }
+
+    if (!window.confirm(`CHRONICLE「${selectedChronicle.name}」を削除しますか？`)) {
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    try {
+      setChronicleBusy(true);
+      setChronicleError('');
+
+      const res = await fetch(`/api/chronicles/${selectedChronicle.id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => null);
+        setChronicleError(error?.error || 'CHRONICLE削除に失敗しました');
+        return;
+      }
+
+      const next = chronicles.filter((item) => item.id !== selectedChronicle.id);
+      setChronicles(next);
+      setSelectedChronicle(next[0] || null);
+      setMessage('CHRONICLEを削除しました');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      setChronicleError('CHRONICLE削除時にエラーが発生しました');
+    } finally {
+      setChronicleBusy(false);
+    }
+  };
+
+  const handleDiscoverChronicle = async () => {
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    try {
+      setChronicleBusy(true);
+      setChronicleError('');
+
+      const res = await fetch('/api/chronicles/discover', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: selectedChronicle?.name || '',
+          description: selectedChronicle?.description || '',
+          host: chronicleDiscoverHost,
+          apiPort: chronicleDiscoverApiPort,
+          tcpPort: chronicleDiscoverTcpPort,
+        }),
+      });
+
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.chronicle) {
+        setChronicleError(payload?.error || 'CHRONICLE検出に失敗しました');
+        return;
+      }
+
+      const chronicle = payload.chronicle as Chronicle;
+      setChronicles((prev) => {
+        const exists = prev.some((item) => item.id === chronicle.id);
+        return exists
+          ? prev.map((item) => (item.id === chronicle.id ? chronicle : item))
+          : [...prev, chronicle];
+      });
+      setSelectedChronicle(chronicle);
+      const modelName = payload?.discovery?.defaultModelName;
+      setMessage(
+        typeof modelName === 'string' && modelName.trim()
+          ? `CHRONICLEを検出・登録しました（モデル: ${modelName}）`
+          : 'CHRONICLEを検出・登録しました'
+      );
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      setChronicleError('CHRONICLE検出時にエラーが発生しました');
+    } finally {
+      setChronicleBusy(false);
+    }
+  };
+
   const handleExportBackup = async () => {
     try {
       setBackupBusy(true);
@@ -1760,6 +2421,22 @@ export default function AdminPage() {
               }}
             >
               ナレッジ管理
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('chronicle')}
+              style={{
+                padding: '8px 14px',
+                backgroundColor: activeTab === 'chronicle' ? '#0066cc' : '#f0f0f0',
+                color: activeTab === 'chronicle' ? 'white' : '#000',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: activeTab === 'chronicle' ? 'bold' : 'normal',
+              }}
+            >
+              CHRONICLE管理
             </button>
 
             <button
@@ -1937,7 +2614,22 @@ export default function AdminPage() {
                           textAlign: 'left',
                         }}
                       >
-                        {domain.name}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                          <span>{domain.name}</span>
+                          {domain.enabled === false && (
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                padding: '2px 6px',
+                                borderRadius: '9999px',
+                                backgroundColor: selectedDomain?.id === domain.id ? 'rgba(255,255,255,0.2)' : '#d1d5db',
+                                color: selectedDomain?.id === domain.id ? '#fff' : '#374151',
+                              }}
+                            >
+                              無効
+                            </span>
+                          )}
+                        </div>
                       </button>
                     </li>
                   ))}
@@ -1957,6 +2649,29 @@ export default function AdminPage() {
                   handleSave();
                 }}
               >
+                <div style={{ marginBottom: '15px' }}>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedDomain.enabled ?? true}
+                      onChange={(e) =>
+                        setSelectedDomain({ ...selectedDomain, enabled: e.target.checked })
+                      }
+                    />
+                    クライアントで選択可能にする
+                  </label>
+                  <div style={{ marginTop: '4px', fontSize: '12px', color: '#666' }}>
+                    OFFにするとドメインデータは保持したまま、クライアントの選択候補から除外されます。
+                  </div>
+                </div>
+
                 <div style={{ marginBottom: '15px' }}>
                   <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
                     ドメイン名
@@ -1995,6 +2710,130 @@ export default function AdminPage() {
                       boxSizing: 'border-box',
                     }}
                   />
+                </div>
+
+                {showDomainSiteAnalysis && (
+                <div style={{ marginBottom: '15px', padding: '12px', border: '1px solid #c8e6c9', borderRadius: '6px', backgroundColor: '#f0fff0' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>サイト解析 → プロンプト自動生成</div>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
+                    <input
+                      type="url"
+                      value={crawlUrl}
+                      onChange={(e) => { setCrawlUrl(e.target.value); setCrawlError(''); setCrawlSuccess(''); }}
+                      placeholder="https://example.com"
+                      disabled={crawling}
+                      style={{
+                        flex: 1,
+                        padding: '6px 10px',
+                        border: '1px solid #ccc',
+                        borderRadius: '4px',
+                        fontSize: '14px',
+                      }}
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      step={1}
+                      value={crawlMaxPages}
+                      onChange={(e) => {
+                        const n = Number.parseInt(e.target.value, 10);
+                        if (Number.isFinite(n)) {
+                          setCrawlMaxPages(n);
+                        } else {
+                          setCrawlMaxPages(1);
+                        }
+                        setCrawlError('');
+                        setCrawlSuccess('');
+                      }}
+                      disabled={crawling}
+                      title="最大ページ数 (1-30)"
+                      style={{
+                        width: '120px',
+                        padding: '6px 10px',
+                        border: '1px solid #ccc',
+                        borderRadius: '4px',
+                        fontSize: '14px',
+                      }}
+                    />
+                    <button
+                      onClick={handleCrawlSite}
+                      disabled={crawling || !crawlUrl.trim()}
+                      style={{
+                        padding: '6px 16px',
+                        backgroundColor: crawling ? '#aaa' : '#388e3c',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: crawling ? 'not-allowed' : 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {crawling ? '解析中...' : 'サイト解析'}
+                    </button>
+                  </div>
+                  {crawlError && <div style={{ color: '#c62828', fontSize: '13px' }}>{crawlError}</div>}
+                  {crawlSuccess && <div style={{ color: '#2e7d32', fontSize: '13px' }}>{crawlSuccess}</div>}
+                  <div style={{ color: '#666', fontSize: '12px', marginTop: '4px' }}>
+                    URLと最大ページ数（1〜30）を指定してサイトをクロールし、ベースシステムプロンプトを自動生成・保存します（既存の内容は上書きされます）
+                  </div>
+                </div>
+                )}
+
+                <div style={{ marginBottom: '15px', padding: '12px', border: '1px solid #bbdefb', borderRadius: '6px', backgroundColor: '#f5fbff' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>システムプロンプト テンプレート</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '8px', alignItems: 'center' }}>
+                    <select
+                      value={selectedDomainPromptTemplateId}
+                      onChange={(e) => setSelectedDomainPromptTemplateId(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '6px 10px',
+                        border: '1px solid #ccc',
+                        borderRadius: '4px',
+                        fontSize: '14px',
+                      }}
+                    >
+                      {DOMAIN_PROMPT_TEMPLATES.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => applyDomainPromptTemplate('replace')}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: '#1976d2',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      上書き適用
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyDomainPromptTemplate('append')}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: '#0288d1',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      追記適用
+                    </button>
+                  </div>
+                  <div style={{ color: '#666', fontSize: '12px', marginTop: '6px' }}>
+                    {DOMAIN_PROMPT_TEMPLATES.find((item) => item.id === selectedDomainPromptTemplateId)?.description}
+                  </div>
                 </div>
 
                 <div style={{ marginBottom: '15px' }}>
@@ -2040,7 +2879,7 @@ export default function AdminPage() {
                 </div>
 
                 <div style={{ marginBottom: '15px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px', backgroundColor: '#fafafa' }}>
-                  <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>Amica アセット/TTS 上書き（ドメイン別）</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>クライアント アセット/TTS 上書き（ドメイン別）</div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
                     <div>
@@ -2053,7 +2892,7 @@ export default function AdminPage() {
                         onChange={(e) =>
                           setSelectedDomain({ ...selectedDomain, characterName: e.target.value })
                         }
-                        placeholder="空欄なら Amica 側の既定名を使用"
+                        placeholder="空欄なら クライアント側の既定名を使用"
                         style={{
                           width: '100%',
                           padding: '8px',
@@ -2074,7 +2913,7 @@ export default function AdminPage() {
                         onChange={(e) =>
                           setSelectedDomain({ ...selectedDomain, bgUrl: e.target.value })
                         }
-                        placeholder="空欄なら Amica 側の既定背景を使用"
+                        placeholder="空欄なら クライアント側の既定背景を使用"
                         style={{
                           width: '100%',
                           padding: '8px',
@@ -2110,6 +2949,30 @@ export default function AdminPage() {
                   </div>
 
                   <div style={{ marginBottom: '12px' }}>
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: '8px',
+                        fontWeight: 'bold',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedDomain.vrmEnabled ?? true}
+                        onChange={(e) =>
+                          setSelectedDomain({ ...selectedDomain, vrmEnabled: e.target.checked })
+                        }
+                      />
+                      VRMを優先表示する
+                    </label>
+                    <div style={{ fontSize: '12px', color: '#666' }}>
+                      ON: VRM表示 / OFF: 2Dアバター表示
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '12px' }}>
                     <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
                       VRM URL
                     </label>
@@ -2119,7 +2982,7 @@ export default function AdminPage() {
                       onChange={(e) =>
                         setSelectedDomain({ ...selectedDomain, vrmUrl: e.target.value })
                       }
-                      placeholder="空欄なら Amica 側の既定VRMを使用"
+                      placeholder="空欄なら クライアント側の既定VRMを使用"
                       style={{
                         width: '100%',
                         padding: '8px',
@@ -2153,6 +3016,149 @@ export default function AdminPage() {
                     </div>
                   </div>
 
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      2Dアバター - 待機時画像URL
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                      <input
+                        type="text"
+                        value={selectedDomain.imageAvatarIdleUrl || ''}
+                        onChange={(e) =>
+                          setSelectedDomain({ ...selectedDomain, imageAvatarIdleUrl: e.target.value })
+                        }
+                        placeholder="待機時の画像URL"
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                      <select
+                        value={selectedDomain.imageAvatarIdleUrl || ''}
+                        onChange={(e) =>
+                          setSelectedDomain({ ...selectedDomain, imageAvatarIdleUrl: e.target.value })
+                        }
+                        style={{
+                          flex: 1,
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          backgroundColor: 'white',
+                        }}
+                      >
+                        <option value="">アップロード済み画像から選択</option>
+                        {bgImageAssets.map((asset) => (
+                          <option key={asset.url} value={asset.url}>
+                            {asset.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {selectedDomain.imageAvatarIdleUrl && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <img
+                          src={selectedDomain.imageAvatarIdleUrl}
+                          alt="2Dアバター待機時プレビュー"
+                          loading="lazy"
+                          style={{
+                            width: '56px',
+                            height: '56px',
+                            objectFit: 'cover',
+                            borderRadius: '4px',
+                            border: '1px solid #e5e7eb',
+                            backgroundColor: '#f8fafc',
+                          }}
+                        />
+                        <span style={{ fontSize: '12px', color: '#666' }}>待機時プレビュー</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      2Dアバター - 発話時画像URL
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                      <input
+                        type="text"
+                        value={selectedDomain.imageAvatarTalkUrl || ''}
+                        onChange={(e) =>
+                          setSelectedDomain({ ...selectedDomain, imageAvatarTalkUrl: e.target.value })
+                        }
+                        placeholder="発話時の画像URL"
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                      <select
+                        value={selectedDomain.imageAvatarTalkUrl || ''}
+                        onChange={(e) =>
+                          setSelectedDomain({ ...selectedDomain, imageAvatarTalkUrl: e.target.value })
+                        }
+                        style={{
+                          flex: 1,
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          backgroundColor: 'white',
+                        }}
+                      >
+                        <option value="">アップロード済み画像から選択</option>
+                        {bgImageAssets.map((asset) => (
+                          <option key={asset.url} value={asset.url}>
+                            {asset.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {selectedDomain.imageAvatarTalkUrl && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <img
+                          src={selectedDomain.imageAvatarTalkUrl}
+                          alt="2Dアバター発話時プレビュー"
+                          loading="lazy"
+                          style={{
+                            width: '56px',
+                            height: '56px',
+                            objectFit: 'cover',
+                            borderRadius: '4px',
+                            border: '1px solid #e5e7eb',
+                            backgroundColor: '#f8fafc',
+                          }}
+                        />
+                        <span style={{ fontSize: '12px', color: '#666' }}>発話時プレビュー</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      2Dアバター - 発話アニメーション間隔（ms）
+                    </label>
+                    <input
+                      type="number"
+                      value={selectedDomain.imageAvatarTalkIntervalMs || ''}
+                      onChange={(e) =>
+                        setSelectedDomain({ ...selectedDomain, imageAvatarTalkIntervalMs: e.target.value ? parseInt(e.target.value, 10) : undefined })
+                      }
+                      placeholder="例: 500"
+                      style={{
+                        width: '100%',
+                        padding: '8px',
+                        border: '1px solid #ddd',
+                        borderRadius: '4px',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div>
                       <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
@@ -2172,7 +3178,7 @@ export default function AdminPage() {
                           backgroundColor: 'white',
                         }}
                       >
-                        <option value="">未設定（Amica既定）</option>
+                        <option value="">未設定（クライアント既定）</option>
                         {sbv2Models.map((model) => (
                           <option key={model.id} value={model.id}>
                             {model.name} (id: {model.id}) {model.isMultiSpeaker ? ' / 複数話者' : ' / 単一話者'}
@@ -2205,6 +3211,37 @@ export default function AdminPage() {
                           boxSizing: 'border-box',
                         }}
                       />
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '12px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      TTS設定
+                    </label>
+                    <select
+                      value={selectedDomain.ttsMuted === true ? 'true' : selectedDomain.ttsMuted === false ? 'false' : ''}
+                      onChange={(e) => {
+                        const nextValue = e.target.value;
+                        setSelectedDomain({
+                          ...selectedDomain,
+                          ttsMuted: nextValue === '' ? undefined : nextValue === 'true',
+                        });
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '8px',
+                        border: '1px solid #ddd',
+                        borderRadius: '4px',
+                        boxSizing: 'border-box',
+                        backgroundColor: 'white',
+                      }}
+                    >
+                      <option value="">未設定（グローバル設定を使用）</option>
+                      <option value="true">TTS OFF（このドメインでは読み上げしない）</option>
+                      <option value="false">TTS ON（このドメインでも読み上げする）</option>
+                    </select>
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#666' }}>
+                      未設定なら現在のグローバル TTS 設定をそのまま使います。
                     </div>
                   </div>
 
@@ -2268,7 +3305,7 @@ export default function AdminPage() {
                   </div>
 
                   <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-                    空欄ならドメイン切替時に Amica の既定設定へ戻します。
+                    空欄ならドメイン切替時に クライアントの既定設定へ戻します。
                   </div>
                 </div>
 
@@ -2327,6 +3364,54 @@ export default function AdminPage() {
                           />
                           {server.name}
                           {!server.enabled && <span style={{ marginLeft: '4px', color: '#999', fontSize: '12px' }}>(無効)</span>}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '15px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+                    組み合わせるCHRONICLE
+                  </label>
+                  <div style={{ border: '1px solid #ddd', borderRadius: '4px', padding: '8px', maxHeight: '180px', overflowY: 'auto' }}>
+                    {chronicles.length === 0 ? (
+                      <div style={{ color: '#666', fontSize: '12px' }}>CHRONICLEを登録してください</div>
+                    ) : (
+                      chronicles.map((chronicle) => (
+                        <label key={chronicle.id} style={{ display: 'block', marginBottom: '6px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={(selectedDomain.chronicleIds || []).includes(chronicle.id)}
+                            onChange={() => toggleDomainChronicle(chronicle.id)}
+                            style={{ marginRight: '8px' }}
+                            disabled={!chronicle.enabled}
+                          />
+                          {chronicle.name}
+                          {!chronicle.enabled && <span style={{ marginLeft: '4px', color: '#999', fontSize: '12px' }}>(無効)</span>}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '15px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>組み合わせるメモリー</div>
+                  <div style={{ marginLeft: '10px' }}>
+                    {memories.length === 0 ? (
+                      <div style={{ color: '#666', fontSize: '12px' }}>メモリーを登録してください</div>
+                    ) : (
+                      memories.map((memory) => (
+                        <label key={`${memory.id}`} style={{ display: 'block', marginBottom: '6px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={(selectedDomain.memoryIds || []).includes(String(memory.id))}
+                            onChange={() => toggleDomainMemory(memory.id)}
+                            style={{ marginRight: '8px' }}
+                            disabled={!memory.active}
+                          />
+                          {memory.name}
+                          {!memory.active && <span style={{ marginLeft: '4px', color: '#999', fontSize: '12px' }}>(無効)</span>}
                         </label>
                       ))
                     )}
@@ -2582,6 +3667,133 @@ export default function AdminPage() {
                     handleSaveKnowledge();
                   }}
                 >
+                  <div style={{ marginBottom: '12px', padding: '12px', border: '1px solid #b3e5fc', borderRadius: '6px', backgroundColor: '#f3fbff' }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>サイト解析 → ナレッジ作成/再取得更新</div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 120px', gap: '8px', marginBottom: '8px' }}>
+                      <input
+                        type="url"
+                        value={knowledgeCrawlUrl}
+                        onChange={(e) => {
+                          setKnowledgeCrawlUrl(e.target.value);
+                          setKnowledgeCrawlError('');
+                          setKnowledgeCrawlSuccess('');
+                        }}
+                        placeholder="https://example.com"
+                        disabled={knowledgeCrawling}
+                        style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '14px' }}
+                      />
+                      <input
+                        type="text"
+                        value={knowledgeCrawlName}
+                        onChange={(e) => {
+                          setKnowledgeCrawlName(e.target.value);
+                          setKnowledgeCrawlError('');
+                          setKnowledgeCrawlSuccess('');
+                        }}
+                        placeholder="ナレッジ名（省略可）"
+                        disabled={knowledgeCrawling}
+                        style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '14px' }}
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        max={30}
+                        step={1}
+                        value={knowledgeCrawlMaxPages}
+                        onChange={(e) => {
+                          const n = Number.parseInt(e.target.value, 10);
+                          setKnowledgeCrawlMaxPages(Number.isFinite(n) ? n : 1);
+                          setKnowledgeCrawlError('');
+                          setKnowledgeCrawlSuccess('');
+                        }}
+                        disabled={knowledgeCrawling}
+                        title="最大ページ数 (1-30)"
+                        style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '14px' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: '8px', marginBottom: '8px' }}>
+                      <select
+                        value={knowledgeCrawlMcpServerId}
+                        onChange={(e) => {
+                          setKnowledgeCrawlMcpServerId(e.target.value);
+                          setKnowledgeCrawlError('');
+                          setKnowledgeCrawlSuccess('');
+                        }}
+                        disabled={knowledgeCrawling}
+                        style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '14px' }}
+                      >
+                        <option value="">MCPサーバーを選択</option>
+                        {mcpServers
+                          .filter((s) => s.enabled)
+                          .map((server) => (
+                            <option key={server.id} value={server.id}>
+                              {server.name} ({server.id})
+                            </option>
+                          ))}
+                      </select>
+
+                      <select
+                        value={knowledgeAttachDomainId}
+                        onChange={(e) => {
+                          setKnowledgeAttachDomainId(e.target.value);
+                          setKnowledgeCrawlError('');
+                          setKnowledgeCrawlSuccess('');
+                        }}
+                        disabled={knowledgeCrawling}
+                        style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '14px' }}
+                      >
+                        <option value="">ドメインへアタッチしない</option>
+                        {domains.map((domain) => (
+                          <option key={domain.id} value={domain.id}>
+                            {domain.name} ({domain.id})
+                          </option>
+                        ))}
+                      </select>
+
+                      <button
+                        type="button"
+                        onClick={handleCreateKnowledgeFromSite}
+                        disabled={knowledgeCrawling || !knowledgeCrawlUrl.trim()}
+                        style={{
+                          padding: '8px 14px',
+                          backgroundColor: knowledgeCrawling ? '#aaa' : '#0288d1',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: knowledgeCrawling ? 'default' : 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {knowledgeCrawling ? '生成中...' : 'ナレッジ生成'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleRefreshKnowledgeFromSite}
+                        disabled={knowledgeCrawling || !knowledgeCrawlUrl.trim() || !selectedKnowledge}
+                        style={{
+                          padding: '8px 14px',
+                          backgroundColor: knowledgeCrawling || !selectedKnowledge ? '#aaa' : '#2e7d32',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: knowledgeCrawling || !selectedKnowledge ? 'default' : 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {knowledgeCrawling ? '更新中...' : '再取得して更新'}
+                      </button>
+                    </div>
+
+                    {knowledgeCrawlError && <div style={{ color: '#c62828', fontSize: '13px' }}>{knowledgeCrawlError}</div>}
+                    {knowledgeCrawlSuccess && <div style={{ color: '#2e7d32', fontSize: '13px' }}>{knowledgeCrawlSuccess}</div>}
+                    <div style={{ color: '#666', fontSize: '12px', marginTop: '4px' }}>
+                      「ナレッジ生成」は新規作成、「再取得して更新」は選択中ナレッジの内容を上書き更新します。どちらも必要に応じてドメインへ自動アタッチします。
+                    </div>
+                  </div>
+
                   <div style={{ marginBottom: '12px' }}>
                     <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>ナレッジ名</label>
                     <input
@@ -2685,6 +3897,366 @@ export default function AdminPage() {
               )}
             </main>
           </>
+        ) : activeTab === 'chronicle' ? (
+          <>
+            <aside style={{ borderRight: '1px solid #ddd', paddingRight: '20px' }}>
+              <h3>CHRONICLE一覧</h3>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                <button
+                  type="button"
+                  onClick={handleCreateChronicle}
+                  style={{
+                    padding: '6px 10px',
+                    backgroundColor: '#4caf50',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  ＋追加
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteChronicle}
+                  disabled={!selectedChronicle}
+                  style={{
+                    padding: '6px 10px',
+                    backgroundColor: !selectedChronicle ? '#ccc' : '#ef5350',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: !selectedChronicle ? 'default' : 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  削除
+                </button>
+              </div>
+
+              {chronicles.length === 0 ? (
+                <p>CHRONICLEがありません</p>
+              ) : (
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {chronicles.map((chronicle) => (
+                    <li key={chronicle.id} style={{ marginBottom: '8px' }}>
+                      <button
+                        onClick={() => {
+                          setSelectedChronicle(chronicle);
+                          setChronicleDiscoverHost(chronicle.host);
+                          setChronicleDiscoverApiPort(chronicle.apiPort);
+                          setChronicleDiscoverTcpPort(chronicle.tcpPort);
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: 'none',
+                          borderRadius: '4px',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          backgroundColor: selectedChronicle?.id === chronicle.id ? '#0066cc' : '#f0f0f0',
+                          color: selectedChronicle?.id === chronicle.id ? 'white' : 'black',
+                        }}
+                      >
+                        {chronicle.name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </aside>
+
+            <main>
+              <h2 style={{ marginTop: 0 }}>CHRONICLE管理</h2>
+
+              <div style={{ marginBottom: '14px', padding: '12px', border: '1px solid #b3e5fc', borderRadius: '6px', backgroundColor: '#f3fbff' }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>BEYOND Core 検出と登録</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 140px auto', gap: '8px', marginBottom: '8px' }}>
+                  <input
+                    type="text"
+                    value={chronicleDiscoverHost}
+                    onChange={(e) => setChronicleDiscoverHost(e.target.value)}
+                    placeholder="127.0.0.1"
+                    style={{ padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={chronicleDiscoverApiPort}
+                    onChange={(e) => setChronicleDiscoverApiPort(parseInt(e.target.value, 10) || 8000)}
+                    style={{ padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={chronicleDiscoverTcpPort}
+                    onChange={(e) => setChronicleDiscoverTcpPort(parseInt(e.target.value, 10) || 8001)}
+                    style={{ padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleDiscoverChronicle}
+                    disabled={chronicleBusy}
+                    style={{
+                      padding: '8px 12px',
+                      border: 'none',
+                      borderRadius: '4px',
+                      backgroundColor: chronicleBusy ? '#ccc' : '#2563eb',
+                      color: 'white',
+                      cursor: chronicleBusy ? 'default' : 'pointer',
+                    }}
+                  >
+                    {chronicleBusy ? '検出中...' : 'Discoverして登録'}
+                  </button>
+                </div>
+                <div style={{ fontSize: '12px', color: '#555' }}>
+                  host, API Port, TCP Port を指定して BEYOND Core MCP を検出します。
+                </div>
+              </div>
+
+              {selectedChronicle ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleSaveChronicle();
+                  }}
+                >
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>CHRONICLE名</label>
+                    <input
+                      type="text"
+                      value={selectedChronicle.name}
+                      onChange={(e) => setSelectedChronicle({ ...selectedChronicle, name: e.target.value })}
+                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>説明</label>
+                    <textarea
+                      value={selectedChronicle.description}
+                      onChange={(e) => setSelectedChronicle({ ...selectedChronicle, description: e.target.value })}
+                      rows={3}
+                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 140px', gap: '10px', marginBottom: '12px' }}>
+                    <label>
+                      Host
+                      <input
+                        type="text"
+                        value={selectedChronicle.host}
+                        onChange={(e) => setSelectedChronicle({ ...selectedChronicle, host: e.target.value })}
+                        style={{ width: '100%', marginTop: '4px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                      />
+                    </label>
+                    <label>
+                      API Port
+                      <input
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={selectedChronicle.apiPort}
+                        onChange={(e) => setSelectedChronicle({ ...selectedChronicle, apiPort: parseInt(e.target.value, 10) || 8000 })}
+                        style={{ width: '100%', marginTop: '4px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                      />
+                    </label>
+                    <label>
+                      TCP Port
+                      <input
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={selectedChronicle.tcpPort}
+                        onChange={(e) => setSelectedChronicle({ ...selectedChronicle, tcpPort: parseInt(e.target.value, 10) || 8001 })}
+                        style={{ width: '100%', marginTop: '4px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                      />
+                    </label>
+                  </div>
+
+                  <div style={{ marginBottom: '12px', fontSize: '12px', color: '#666' }}>
+                    最終検出: {selectedChronicle.lastDiscoveredAt || '未実行'}
+                    <br />
+                    最終接続確認: {selectedChronicle.lastConnectedAt || '未実行'}
+                  </div>
+
+                  <div style={{ marginBottom: '15px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px', backgroundColor: '#f9f9f9' }}>
+                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                       <div style={{ fontWeight: 'bold' }}>対応メモリー</div>
+                       <button
+                         type="button"
+                         onClick={async () => {
+                           const token = localStorage.getItem('injection_token');
+                           if (!token) return;
+                           await loadMemories(token, selectedChronicle.id);
+                         }}
+                         disabled={loadingMemories}
+                         style={{
+                           padding: '4px 8px',
+                           fontSize: '12px',
+                           backgroundColor: loadingMemories ? '#ccc' : '#2563eb',
+                           color: 'white',
+                           border: 'none',
+                           borderRadius: '4px',
+                           cursor: loadingMemories ? 'default' : 'pointer',
+                         }}
+                       >
+                         {loadingMemories ? '更新中...' : '更新'}
+                       </button>
+                     </div>
+                    <div style={{ marginLeft: '10px', fontSize: '13px' }}>
+                      {memories.length === 0 ? (
+                        <div style={{ color: '#999' }}>メモリーが登録されていません</div>
+                      ) : (
+                        <>
+                          <div style={{ marginBottom: '8px', color: '#666' }}>
+                            登録済みメモリー: {memories.length}個
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                            {memories.map((memory) => (
+                              <div
+                                key={`${memory.id}`}
+                                style={{
+                                  padding: '10px',
+                                  border: memory.active ? '2px solid #10b981' : '1px solid #e5e7eb',
+                                  borderRadius: '6px',
+                                  backgroundColor: memory.active ? '#f0fdf4' : '#f9fafb',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '6px',
+                                }}
+                              >
+                                {/* Header: Name + Active Status */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                                  <div style={{ fontWeight: '600', fontSize: '13px', color: '#1f2937', flex: 1 }}>
+                                    {memory.name}
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                    {memory.block_height !== undefined && (
+                                      <span style={{
+                                        fontSize: '9px',
+                                        fontWeight: '600',
+                                        padding: '2px 6px',
+                                        backgroundColor: '#dbeafe',
+                                        color: '#0369a1',
+                                        borderRadius: '3px',
+                                        border: '1px solid #0ea5e9',
+                                      }}>
+                                        🔗 On-Chain
+                                      </span>
+                                    )}
+                                    <div style={{ fontSize: '11px', fontWeight: '500', color: memory.active ? '#10b981' : '#9ca3af' }}>
+                                      {memory.active ? '✓ 有効' : '○ 無効'}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* On-chain Info: Block Height + Network */}
+                                {memory.block_height !== undefined && (
+                                  <div style={{ fontSize: '11px', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <span>🔗</span>
+                                    <span>
+                                      Block #{memory.block_height.toLocaleString()}
+                                      {memory.network && ` (${memory.network})`}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Item Count */}
+                                {memory.item_count !== undefined && memory.item_count > 0 && (
+                                  <div style={{ fontSize: '10px', color: '#6b7280' }}>
+                                    📦 {memory.item_count}個のアイテム
+                                  </div>
+                                )}
+
+                                {/* Summary */}
+                                {memory.summary && (
+                                  <div style={{ fontSize: '11px', color: '#4b5563', lineHeight: '1.4', maxHeight: '44px', overflow: 'hidden' }}>
+                                    {memory.summary.substring(0, 120)}
+                                    {memory.summary.length > 120 ? '...' : ''}
+                                  </div>
+                                )}
+
+                                {/* Memory ID */}
+                                <div style={{ fontSize: '10px', color: '#9ca3af', marginTop: '2px' }}>
+                                  ID: {memory.id}
+                                </div>
+
+                                {/* Toggle Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleMemoryActive(memory.id, !memory.active)}
+                                  disabled={updatingMemoryId === memory.id}
+                                  style={{
+                                    padding: '5px 10px',
+                                    fontSize: '11px',
+                                    fontWeight: '500',
+                                    backgroundColor: updatingMemoryId === memory.id ? '#d1d5db' : memory.active ? '#ef4444' : '#10b981',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: updatingMemoryId === memory.id ? 'default' : 'pointer',
+                                    transition: 'background-color 0.2s',
+                                  }}
+                                >
+                                  {updatingMemoryId === memory.id ? '更新中...' : memory.active ? '無効にする' : '有効にする'}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ marginTop: '10px', fontSize: '12px', color: '#666' }}>
+                            ※ メモリーはドメイン設定で選択されます
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {chronicleError && (
+                    <div style={{ marginBottom: '10px', color: '#b91c1c', fontSize: '12px' }}>
+                      {chronicleError}
+                    </div>
+                  )}
+
+                  {message && (
+                    <div
+                      style={{
+                        padding: '10px',
+                        marginBottom: '15px',
+                        backgroundColor: message.includes('失敗') ? '#ffebee' : '#e8f5e9',
+                        color: message.includes('失敗') ? '#c62828' : '#2e7d32',
+                        borderRadius: '4px',
+                      }}
+                    >
+                      {message}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={chronicleBusy}
+                    style={{
+                      padding: '10px 20px',
+                      backgroundColor: chronicleBusy ? '#ccc' : '#4caf50',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: chronicleBusy ? 'default' : 'pointer',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    {chronicleBusy ? '保存中...' : 'CHRONICLE保存'}
+                  </button>
+                </form>
+              ) : (
+                <p>CHRONICLEを選択してください</p>
+              )}
+            </main>
+          </>
         ) : activeTab === 'asset' ? (
           <>
             <aside style={{ borderRight: '1px solid #ddd', paddingRight: '20px' }}>
@@ -2693,7 +4265,7 @@ export default function AdminPage() {
                 VRM: <strong>{vrmAssets.length}</strong>
               </div>
               <div style={{ marginBottom: '14px', fontSize: '13px', color: '#444' }}>
-                背景画像: <strong>{bgImageAssets.length}</strong>
+                画像: <strong>{bgImageAssets.length}</strong>
               </div>
               <button
                 type="button"
@@ -2725,7 +4297,7 @@ export default function AdminPage() {
               <h2 style={{ marginTop: 0 }}>アセット管理</h2>
 
               <div style={{ marginBottom: '20px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px' }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>背景画像（bgimage）</div>
+                <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>画像（bgimage）</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
                   <label
                     style={{
@@ -2737,7 +4309,7 @@ export default function AdminPage() {
                       fontSize: '12px',
                     }}
                   >
-                    {uploadingAsset === 'bgimage' ? 'アップロード中...' : '背景画像をアップロード'}
+                    {uploadingAsset === 'bgimage' ? 'アップロード中...' : '画像をアップロード'}
                     <input
                       type="file"
                       accept=".png,.jpg,.jpeg,.webp,.gif"
@@ -2754,13 +4326,29 @@ export default function AdminPage() {
 
                 <div style={{ border: '1px solid #eee', borderRadius: '4px', overflow: 'hidden' }}>
                   {bgImageAssets.length === 0 ? (
-                    <div style={{ padding: '10px', color: '#666' }}>背景画像がありません</div>
+                    <div style={{ padding: '10px', color: '#666' }}>画像がありません</div>
                   ) : (
                     bgImageAssets.map((asset) => (
-                      <div key={asset.url} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', padding: '10px', borderBottom: '1px solid #f0f0f0' }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.name}</div>
-                          <div style={{ fontSize: '12px', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.url}</div>
+                      <div key={asset.url} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', padding: '10px', borderBottom: '1px solid #f0f0f0' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                          <img
+                            src={asset.url}
+                            alt={asset.name}
+                            loading="lazy"
+                            style={{
+                              width: '56px',
+                              height: '56px',
+                              objectFit: 'cover',
+                              borderRadius: '4px',
+                              border: '1px solid #e5e7eb',
+                              flexShrink: 0,
+                              backgroundColor: '#f8fafc',
+                            }}
+                          />
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.name}</div>
+                            <div style={{ fontSize: '12px', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.url}</div>
+                          </div>
                         </div>
                         <button
                           type="button"

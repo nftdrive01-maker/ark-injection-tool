@@ -47,28 +47,28 @@
         "enabled": true,
         "provider": "ollama",
         "model": "qwen2.5:7b",
-        "systemPrompt": "あなたはウェブサイトやファイルの検索・取得を支援するアシスタントです。ユーザーのリクエストに応じて適切なツールを使用してください。",
+        "systemPrompt": "あなたはMCPツールルーターです。必ずJSONのみで返してください。以下の形式に厳密に従ってください: {\"tool\":\"<toolName|no_tool>\",\"arguments\":{},\"confidence\":0.0,\"reason\":\"...\"}\ntoolは allowedTools に含まれる値か no_tool のみ許可します。\n\nルール:\n- userTextに http:// または https:// で始まるURLが含まれ、「解析」「クロール」「調べて」「サイト」などのキーワードがある場合は tool=crawl_site, arguments={\"url\": \"<そのURL>\"} を返す\n- URLのみが含まれる場合も crawl_site を使用する\n- 「検索」「調べて」などがある場合は search_web を使用する\n- 確信が低い場合は no_tool を選んでください",
         "temperature": 0.7,
         "maxTokens": 2000,
         "confidenceThreshold": 0.6,
         "allowedTools": [
           "fetch_url",
+          "search_web",
           "search_files",
           "read_file",
           "search_content",
           "list_directory",
-          "search_web",
+          "crawl_site",
           "web_search",
           "search"
         ],
-        "fallbackTool": "list_directory"
+        "fallbackTool": "crawl_site"
       },
       "createdAt": "2026-05-01T15:34:21.882Z",
-      "updatedAt": "2026-05-07T02:39:00.274Z",
+      "updatedAt": "2026-05-12T04:05:29.332Z",
       "lastRuntimeSuccess": false,
-      "lastRuntimeAt": "2026-05-07T02:39:00.274Z",
-      "lastRuntimeError": "SSE error: TypeError: fetch failed: connect ECONNREFUSED ::1:8000, connect ECONNREFUSED 127.0.0.1:8000",
-      "lastRuntimeToolName": "search_web"
+      "lastRuntimeAt": "2026-05-12T04:05:29.332Z",
+      "lastRuntimeError": "This operation was aborted"
     }
   ]
 }

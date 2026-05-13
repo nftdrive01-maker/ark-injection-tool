@@ -129,6 +129,17 @@ function createFallbackDecision(userText: string): ToolDecision {
 }
 
 function normalizeToolArguments(toolName: string, args: Record<string, unknown>, userText: string): Record<string, unknown> {
+  if (toolName === 'crawl_site') {
+    const directUrl = typeof args.url === 'string' && args.url.trim() ? args.url.trim() : '';
+    const urlFromText = extractUrlFromText(userText);
+    const url = directUrl || urlFromText || '';
+    if (!url) {
+      return args;
+    }
+    const maxPages = typeof args.max_pages === 'number' ? args.max_pages : 10;
+    return { url, max_pages: maxPages };
+  }
+
   if (toolName === 'fetch_url') {
     const directUrl = typeof args.url === 'string' && args.url.trim() ? args.url.trim() : '';
     const query = typeof args.query === 'string' && args.query.trim()
@@ -519,18 +530,27 @@ function extractTextContent(callResult: unknown): string {
 }
 
 async function createTransport(server: MCPServer) {
+  // Docker環境では localhost を内部サービス名に置換
+  const internalBase = process.env.INJECTION_MCP_INTERNAL_BASE_URL;
+  function resolveUrl(url: string): string {
+    if (internalBase) {
+      return url.replace(/^https?:\/\/localhost(:\d+)?/, internalBase);
+    }
+    return url;
+  }
+
   if (server.transport === 'sse') {
     if (!server.config.url) {
       throw new Error('SSE URLが未設定です');
     }
-    return new SSEClientTransport(new URL(server.config.url));
+    return new SSEClientTransport(new URL(resolveUrl(server.config.url)));
   }
 
   if (server.transport === 'http') {
     if (!server.config.url) {
       throw new Error('HTTP URLが未設定です');
     }
-    return new StreamableHTTPClientTransport(new URL(server.config.url));
+    return new StreamableHTTPClientTransport(new URL(resolveUrl(server.config.url)));
   }
 
   throw new Error('stdioトランスポートはPhase 2対象外です');

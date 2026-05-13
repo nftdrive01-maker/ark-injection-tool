@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDomainOptions } from '@/lib/domains';
+import { getChronicleById, getDomainOptions } from '@/lib/domains';
 
-const AMICA_ORIGIN = process.env.NEXT_PUBLIC_AMICA_ORIGIN || 'http://localhost:3000';
+const CLIENT_ORIGIN = process.env.NEXT_PUBLIC_AMICA_ORIGIN || 'http://localhost:3000';
 
 /**
  * リクエストから injection-tool 自身のオリジンを解決する。
@@ -35,11 +35,19 @@ export async function GET(req: NextRequest) {
     const rawDomains = getDomainOptions();
 
     // アセット URL を injection-tool の絶対 URL に変換してから返す
-    const domains = rawDomains.map((d) => ({
-      ...d,
-      vrmUrl: toAbsoluteAssetUrl(d.vrmUrl, origin),
-      bgUrl: toAbsoluteAssetUrl(d.bgUrl, origin),
-    }));
+    const domains = rawDomains
+      .filter((d) => d.enabled !== false)
+      .map((d) => ({
+        ...d,
+        chronicleAttached: Array.isArray(d.chronicleIds) && d.chronicleIds.some((id) => {
+          const chronicle = getChronicleById(id);
+          return Boolean(chronicle && chronicle.enabled);
+        }),
+        vrmUrl: toAbsoluteAssetUrl(d.vrmUrl, origin),
+        bgUrl: toAbsoluteAssetUrl(d.bgUrl, origin),
+        imageAvatarIdleUrl: toAbsoluteAssetUrl(d.imageAvatarIdleUrl, origin),
+        imageAvatarTalkUrl: toAbsoluteAssetUrl(d.imageAvatarTalkUrl, origin),
+      }));
 
     return NextResponse.json(
       {
@@ -49,7 +57,7 @@ export async function GET(req: NextRequest) {
       {
         status: 200,
         headers: {
-          'Access-Control-Allow-Origin': AMICA_ORIGIN,
+          'Access-Control-Allow-Origin': CLIENT_ORIGIN,
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type',
         },
@@ -64,7 +72,7 @@ export async function OPTIONS() {
   return new NextResponse(null, {
     status: 200,
     headers: {
-      'Access-Control-Allow-Origin': AMICA_ORIGIN,
+      'Access-Control-Allow-Origin': CLIENT_ORIGIN,
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
       'Access-Control-Max-Age': '86400',

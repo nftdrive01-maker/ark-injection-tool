@@ -6,7 +6,7 @@
 
 ### ✅ 完成した機能
 
-#### 1. **Amica側 インターセプト実装**
+#### 1. **クライアント側 インターセプト実装**
 - `src/features/chat/chat.ts`: UI通常会話路線での注入実装
 - `src/utils/askLlm.ts`: externalAPI 路線での注入実装
 - `src/lib/injectionClient.ts`: 注入API呼び出しクライアント（fail-open対応）
@@ -18,7 +18,7 @@
 - **管理画面** (`/admin`): ドメイン別の知識ベース編集UI
 - **API エンドポイント群**:
   - `/api/auth/login`: 認証（トークン発行）
-  - `/api/intercept`: **核心** - Amica送信前インターセプト、注入データ返却
+   - `/api/intercept`: **核心** - クライアント送信前インターセプト、注入データ返却
   - `/api/domains`: ドメイン一覧・管理
   - `/api/domains/{id}`: 個別ドメイン更新
   - `/api/health`: ヘルスチェック（死活監視用）
@@ -27,13 +27,13 @@
   - `src/lib/domains.ts`: JSON ファイルベースの永続管理
 
 #### 3. **型定義・I/F仕様**
-- `types/injection.ts` (Amica側): 共有型定義
+- `types/injection.ts` (クライアント側): 共有型定義
 - `types/injection.ts` (injection-tool側): 同型
 - fail-open条件を明記（URL未設定、HTTP 5xx、タイムアウト等での素通し）
 
 #### 4. **ドキュメント**
 - injection-tool README.md
-- Amica README.md 更新（Dynamic Knowledge Injection セクション）
+- クライアント README.md 更新（Dynamic Knowledge Injection セクション）
 - .env.example / .env.local 設定見本
 
 ---
@@ -64,7 +64,7 @@ npm run dev
 - `/admin` 側バー で「専門相談」「施設案内」「緊急告知」が表示
 - 各ドメインのシステムプロンプト・コンテキストが編集可能
 
-#### 1.4 Amica 起動
+#### 1.4 クライアント起動
 
 ```bash
 cd d:\amica
@@ -81,19 +81,19 @@ NEXT_PUBLIC_INJECTION_TOOL_ENABLED=true
 #### 1.5 E2E 検証
 
 1. **注入なし状態で確認**:
-   - `NEXT_PUBLIC_INJECTION_TOOL_ENABLED=false` に変更して Amica 再起動
+   - `NEXT_PUBLIC_INJECTION_TOOL_ENABLED=false` に変更して クライアント再起動
    - ユーザー入力が「素の」システムプロンプトで処理される
 
 2. **注入あり状態で確認**:
    - `NEXT_PUBLIC_INJECTION_TOOL_ENABLED=true` に戻す
    - injection-tool で「専門相談」ドメイン内容を編集（例: "【医学知識】..." を追加）
-   - Amica でユーザー入力を送信
+   - クライアント でユーザー入力を送信
    - ブラウザコンソール確認: `fetchInjectedContext` 呼び出しログ
    - LLM回答が編集内容を反映していることを確認
 
 3. **fail-open 検証**:
    - injection-tool を停止（Ctrl+C）
-   - Amica でユーザー入力を送信
+   - クライアント でユーザー入力を送信
    - ✅ エラーなく通常稼働（コンソールに "trying cache fallback" ログ）
 
 4. **キャッシュ動作確認**:
@@ -104,24 +104,24 @@ NEXT_PUBLIC_INJECTION_TOOL_ENABLED=true
 
 #### 2.1 複数ドメインの切替
 
-1. Amica `.env.local` に追加:
+1. クライアント `.env.local` に追加:
    ```env
    NEXT_PUBLIC_INJECTION_DEFAULT_DOMAIN=facility_guide
    ```
 
-2. Amica 再起動後、「施設案内」ドメイン内容が自動適用
+2. クライアント再起動後、「施設案内」ドメイン内容が自動適用
 
 #### 2.2 定期更新 - 非エンジニア向け
 
 - Web フォーム（/admin）でプロンプト変更すれば OK
-- Amica ガウえ再起動不要（次回送信時に自動反映）
+- クライアントは再起動不要（次回送信時に自動反映）
 
 ### Phase 3: 本番配置
 
 #### 3.1 別マシン配置（オプション）
 
 - injection-tool を別ホスト（例: localhost:4001 → 192.168.1.100:4001）に配置
-- Amica `.env.local` の URL を更新
+- クライアント `.env.local` の URL を更新
 - CORS 許可オリジン設定を injection-tool で変更
 
 #### 3.2 認証強化（将来）
@@ -138,7 +138,7 @@ NEXT_PUBLIC_INJECTION_TOOL_ENABLED=true
 
 ## トラブルシューティング
 
-### 症状: Amica が注入を利用していない
+### 症状: クライアント が注入を利用していない
 
 **確認事項:**
 1. `.env.local` に `NEXT_PUBLIC_INJECTION_TOOL_URL` が設定されているか
@@ -186,7 +186,7 @@ node
 
 ```
 ┌─────────────────┐
-│  Amica Browser  │
+│ クライアント画面 │
 │  (Port 3000)    │
 └────────┬────────┘
          │ (1) UserText 送信前
@@ -213,7 +213,7 @@ node
          │ (3) Response かキャッシュ
          ↓
 ┌─────────────────────────────────────┐
-│ Amica - Message 合成                │
+│ クライアント - Message 合成         │
 │                                     │
 │  system = config.system_prompt      │
 │         + injected.systemPrompt     │
@@ -304,7 +304,7 @@ d:\injection-tool\
 
 ## 重要な注語
 
-- **fail-open**: injection-tool 停止しても Amica は確実に稼働
+- **fail-open**: injection-tool 停止しても クライアント は確実に稼働
 - **ドメイン**: 知識ソースの識別子（consultation, facility_guide等）
 - **TTL**: Time To Live - キャッシュ有効期限（秒）
 - **バイパス**: 注入適用をスキップして素の入力をLLMに送信

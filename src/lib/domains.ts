@@ -19,19 +19,40 @@ export interface Knowledge {
   updatedAt: string;
 }
 
+export interface Chronicle {
+  id: string;
+  name: string;
+  description: string;
+  host: string;
+  apiPort: number;
+  tcpPort: number;
+  enabled: boolean;
+  lastDiscoveredAt?: string;
+  lastConnectedAt?: string;
+  updatedAt: string;
+}
+
 export interface Domain {
   id: string;
   name: string;
   description: string;
+  enabled?: boolean;
   baseSystemPrompt: string;
   baseContext: string;
   bgUrl?: string;
   characterName?: string;
+  vrmEnabled?: boolean;
   vrmUrl?: string;
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
+  ttsMuted?: boolean;
+  imageAvatarIdleUrl?: string;
+  imageAvatarTalkUrl?: string;
+  imageAvatarTalkIntervalMs?: number;
   knowledgeIds: string[];
   mcpServerIds?: string[];
+  chronicleIds?: string[];
+  memoryIds?: string[];
   version: string;
   ttl: number;
 }
@@ -44,6 +65,7 @@ export interface ResolvedDomain extends Domain {
 interface KnowledgeDomainStore {
   knowledges: Knowledge[];
   domains: Domain[];
+  chronicles: Chronicle[];
 }
 
 export interface FullBackupData {
@@ -52,6 +74,7 @@ export interface FullBackupData {
   store: {
     knowledges: Knowledge[];
     domains: Domain[];
+    chronicles: Chronicle[];
   };
   pronunciations?: PronunciationRule[];
 }
@@ -112,7 +135,14 @@ function loadStoreFromFile(): KnowledgeDomainStore {
 
     // 新形式
     if (parsed?.knowledges && parsed?.domains) {
-      return parsed as KnowledgeDomainStore;
+      return {
+        knowledges: parsed.knowledges as Knowledge[],
+        domains: (parsed.domains as Domain[]).map((domain) => ({
+          ...domain,
+          chronicleIds: Array.isArray(domain.chronicleIds) ? domain.chronicleIds : [],
+        })),
+        chronicles: Array.isArray(parsed.chronicles) ? parsed.chronicles as Chronicle[] : [],
+      };
     }
 
     // 旧形式（Domain配列）から移行
@@ -162,15 +192,19 @@ function migrateLegacyDomains(legacyDomains: Array<{
     id: domain.id,
     name: domain.name,
     description: domain.description,
+    enabled: true,
     baseSystemPrompt: '',
     baseContext: '',
     knowledgeIds: [`${domain.id}_knowledge`],
     mcpServerIds: [],
+    chronicleIds: [],
+    memoryIds: [],
+    ttsMuted: undefined,
     version: domain.version || '1.0.0',
     ttl: domain.ttl || DEFAULT_TTL,
   }));
 
-  return { knowledges, domains };
+  return { knowledges, domains, chronicles: [] };
 }
 
 /**
@@ -195,21 +229,26 @@ function getDefaultStore(): KnowledgeDomainStore {
       id: sanitizeId(DEFAULT_DOMAIN_ID, 'default'),
       name: DEFAULT_DOMAIN_NAME,
       description: DEFAULT_DOMAIN_DESCRIPTION,
+      enabled: true,
       baseSystemPrompt: DEFAULT_DOMAIN_BASE_SYSTEM_PROMPT,
       baseContext: DEFAULT_DOMAIN_BASE_CONTEXT,
       bgUrl: '',
       characterName: '',
+      vrmEnabled: true,
       vrmUrl: '',
       stylebertvits2ModelId: '',
       stylebertvits2Style: '',
+      ttsMuted: undefined,
       knowledgeIds: [sanitizeId(DEFAULT_KNOWLEDGE_ID, 'default_knowledge')],
       mcpServerIds: [],
+      chronicleIds: [],
+      memoryIds: [],
       version: '1.0.0',
       ttl: DEFAULT_TTL,
     },
   ];
 
-  return { knowledges, domains };
+  return { knowledges, domains, chronicles: [] };
 }
 
 function writeStoreToFile(store: KnowledgeDomainStore): void {
@@ -308,6 +347,12 @@ export function updateDomain(id: string, updates: Partial<Domain>): ResolvedDoma
     knowledgeIds: Array.isArray(updates.knowledgeIds)
       ? updates.knowledgeIds
       : store.domains[index].knowledgeIds,
+    chronicleIds: Array.isArray(updates.chronicleIds)
+      ? updates.chronicleIds
+      : (store.domains[index].chronicleIds || []),
+    memoryIds: Array.isArray(updates.memoryIds)
+      ? updates.memoryIds
+      : (store.domains[index].memoryIds || []),
   };
 
   store.domains[index] = updated;
@@ -420,15 +465,23 @@ export function deleteKnowledge(id: string): boolean {
 export function createDomain(input: {
   name: string;
   description?: string;
+  enabled?: boolean;
   baseSystemPrompt?: string;
   baseContext?: string;
   bgUrl?: string;
   characterName?: string;
+  vrmEnabled?: boolean;
   vrmUrl?: string;
+  imageAvatarIdleUrl?: string;
+  imageAvatarTalkUrl?: string;
+  imageAvatarTalkIntervalMs?: number;
+  ttsMuted?: boolean;
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   knowledgeIds?: string[];
   mcpServerIds?: string[];
+  chronicleIds?: string[];
+  memoryIds?: string[];
   ttl?: number;
 }): ResolvedDomain {
   const store = loadStoreFromFile();
@@ -450,15 +503,24 @@ export function createDomain(input: {
     id,
     name: input.name,
     description: input.description || '',
+    enabled: input.enabled ?? true,
     baseSystemPrompt: input.baseSystemPrompt || '',
     baseContext: input.baseContext || '',
     bgUrl: input.bgUrl || '',
     characterName: input.characterName || '',
+    vrmEnabled: input.vrmEnabled ?? true,
     vrmUrl: input.vrmUrl || '',
+    imageAvatarIdleUrl: input.imageAvatarIdleUrl || '',
+    imageAvatarTalkUrl: input.imageAvatarTalkUrl || '',
+    imageAvatarTalkIntervalMs:
+      typeof input.imageAvatarTalkIntervalMs === 'number' ? input.imageAvatarTalkIntervalMs : 180,
+    ttsMuted: typeof input.ttsMuted === 'boolean' ? input.ttsMuted : undefined,
     stylebertvits2ModelId: input.stylebertvits2ModelId || '',
     stylebertvits2Style: input.stylebertvits2Style || '',
     knowledgeIds,
     mcpServerIds: Array.isArray(input.mcpServerIds) ? input.mcpServerIds : [],
+    chronicleIds: Array.isArray(input.chronicleIds) ? input.chronicleIds : [],
+    memoryIds: Array.isArray(input.memoryIds) ? input.memoryIds : [],
     version: '1.0.0',
     ttl: typeof input.ttl === 'number' && input.ttl > 0 ? input.ttl : DEFAULT_TTL,
   };
@@ -491,22 +553,128 @@ export function deleteDomain(id: string): boolean {
 export function getDomainOptions(): Array<{
   id: string;
   name: string;
+  enabled?: boolean;
   bgUrl?: string;
   characterName?: string;
+  vrmEnabled?: boolean;
   vrmUrl?: string;
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
+  ttsMuted?: boolean;
+  imageAvatarIdleUrl?: string;
+  imageAvatarTalkUrl?: string;
+  imageAvatarTalkIntervalMs?: number;
+  chronicleIds?: string[];
 }> {
   const store = loadStoreFromFile();
   return store.domains.map((domain) => ({
     id: domain.id,
     name: domain.name,
+    enabled: domain.enabled ?? true,
     bgUrl: domain.bgUrl || '',
     characterName: domain.characterName || '',
+    vrmEnabled: domain.vrmEnabled ?? true,
     vrmUrl: domain.vrmUrl || '',
     stylebertvits2ModelId: domain.stylebertvits2ModelId || '',
     stylebertvits2Style: domain.stylebertvits2Style || '',
+    ttsMuted: domain.ttsMuted,
+    imageAvatarIdleUrl: domain.imageAvatarIdleUrl || '',
+    imageAvatarTalkUrl: domain.imageAvatarTalkUrl || '',
+    imageAvatarTalkIntervalMs: domain.imageAvatarTalkIntervalMs || 180,
+    chronicleIds: Array.isArray(domain.chronicleIds) ? domain.chronicleIds : [],
   }));
+}
+
+export function getAllChronicles(): Chronicle[] {
+  const store = loadStoreFromFile();
+  return [...store.chronicles].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+}
+
+export function getChronicleById(id: string): Chronicle | undefined {
+  const store = loadStoreFromFile();
+  return store.chronicles.find((item) => item.id === id);
+}
+
+export function createChronicle(input: {
+  name: string;
+  description?: string;
+  host: string;
+  apiPort: number;
+  tcpPort: number;
+  enabled?: boolean;
+  lastDiscoveredAt?: string;
+  lastConnectedAt?: string;
+}): Chronicle {
+  const store = loadStoreFromFile();
+  const baseId = sanitizeId(input.name, 'chronicle');
+
+  let id = baseId;
+  let suffix = 1;
+  while (store.chronicles.some((chronicle) => chronicle.id === id)) {
+    id = `${baseId}_${suffix}`;
+    suffix += 1;
+  }
+
+  const created: Chronicle = {
+    id,
+    name: input.name,
+    description: input.description || '',
+    host: input.host,
+    apiPort: input.apiPort,
+    tcpPort: input.tcpPort,
+    enabled: input.enabled ?? true,
+    lastDiscoveredAt: input.lastDiscoveredAt,
+    lastConnectedAt: input.lastConnectedAt,
+    updatedAt: new Date().toISOString(),
+  };
+
+  store.chronicles.push(created);
+  writeStoreToFile(store);
+  return created;
+}
+
+export function updateChronicle(id: string, updates: Partial<Chronicle>): Chronicle | null {
+  const store = loadStoreFromFile();
+  const index = store.chronicles.findIndex((chronicle) => chronicle.id === id);
+
+  if (index === -1) {
+    return null;
+  }
+
+  const updated: Chronicle = {
+    ...store.chronicles[index],
+    ...updates,
+    id: store.chronicles[index].id,
+    updatedAt: new Date().toISOString(),
+  };
+
+  store.chronicles[index] = updated;
+
+  try {
+    writeStoreToFile(store);
+    return updated;
+  } catch (err) {
+    console.error('Error updating chronicle:', err);
+    return null;
+  }
+}
+
+export function deleteChronicle(id: string): boolean {
+  const store = loadStoreFromFile();
+  const isReferenced = store.domains.some((domain) => (domain.chronicleIds || []).includes(id));
+  if (isReferenced) {
+    return false;
+  }
+
+  const before = store.chronicles.length;
+  store.chronicles = store.chronicles.filter((chronicle) => chronicle.id !== id);
+
+  if (store.chronicles.length === before) {
+    return false;
+  }
+
+  writeStoreToFile(store);
+  return true;
 }
 
 /**
@@ -531,6 +699,7 @@ export function exportFullBackup(): FullBackupData {
     store: {
       knowledges: store.knowledges,
       domains: store.domains,
+      chronicles: store.chronicles,
     },
     pronunciations,
   };
@@ -545,12 +714,14 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
     store?: {
       knowledges?: Array<Partial<Knowledge>>;
       domains?: Array<Partial<Domain>>;
+      chronicles?: Array<Partial<Chronicle>>;
     };
     pronunciations?: Array<Partial<PronunciationRule>>;
   };
 
   const knowledgesRaw = candidate.store?.knowledges;
   const domainsRaw = candidate.store?.domains;
+  const chroniclesRaw = candidate.store?.chronicles;
   const pronunciationsRaw = candidate.pronunciations;
 
   if (!Array.isArray(knowledgesRaw) || !Array.isArray(domainsRaw)) {
@@ -584,14 +755,71 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
     id: sanitizeId(typeof item.id === 'string' ? item.id : `domain_${index + 1}`, `domain_${index + 1}`),
     name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : `Domain ${index + 1}`,
     description: typeof item.description === 'string' ? item.description : '',
+    enabled: typeof item.enabled === 'boolean' ? item.enabled : true,
     baseSystemPrompt: typeof item.baseSystemPrompt === 'string' ? item.baseSystemPrompt : '',
     baseContext: typeof item.baseContext === 'string' ? item.baseContext : '',
+    bgUrl: typeof item.bgUrl === 'string' ? item.bgUrl : undefined,
+    characterName: typeof item.characterName === 'string' ? item.characterName : undefined,
+    vrmEnabled: typeof item.vrmEnabled === 'boolean' ? item.vrmEnabled : undefined,
+    vrmUrl: typeof item.vrmUrl === 'string' ? item.vrmUrl : undefined,
+    stylebertvits2ModelId: typeof item.stylebertvits2ModelId === 'string' ? item.stylebertvits2ModelId : undefined,
+    stylebertvits2Style: typeof item.stylebertvits2Style === 'string' ? item.stylebertvits2Style : undefined,
+    imageAvatarIdleUrl: typeof item.imageAvatarIdleUrl === 'string' ? item.imageAvatarIdleUrl : undefined,
+    imageAvatarTalkUrl: typeof item.imageAvatarTalkUrl === 'string' ? item.imageAvatarTalkUrl : undefined,
+    imageAvatarTalkIntervalMs: typeof item.imageAvatarTalkIntervalMs === 'number' ? item.imageAvatarTalkIntervalMs : undefined,
     knowledgeIds: Array.isArray(item.knowledgeIds)
       ? item.knowledgeIds.filter((id): id is string => typeof id === 'string')
       : [],
+    chronicleIds: Array.isArray(item.chronicleIds)
+      ? item.chronicleIds.filter((id): id is string => typeof id === 'string')
+      : [],
+    memoryIds: Array.isArray(item.memoryIds)
+      ? item.memoryIds.filter((id): id is string => typeof id === 'string')
+      : [],
+    mcpServerIds: Array.isArray(item.mcpServerIds)
+      ? item.mcpServerIds.filter((id): id is string => typeof id === 'string')
+      : undefined,
     version: typeof item.version === 'string' && item.version.trim() ? item.version : '1.0.0',
     ttl: typeof item.ttl === 'number' && item.ttl > 0 ? item.ttl : DEFAULT_TTL,
   }));
+
+  const chronicles: Chronicle[] = Array.isArray(chroniclesRaw)
+    ? chroniclesRaw.map((item, index) => ({
+        id: sanitizeId(typeof item.id === 'string' ? item.id : `chronicle_${index + 1}`, `chronicle_${index + 1}`),
+        name:
+          typeof item.name === 'string' && item.name.trim()
+            ? item.name.trim()
+            : `Chronicle ${index + 1}`,
+        description: typeof item.description === 'string' ? item.description : '',
+        host: typeof item.host === 'string' && item.host.trim() ? item.host.trim() : '127.0.0.1',
+        apiPort:
+          typeof item.apiPort === 'number' && Number.isFinite(item.apiPort)
+            ? Math.floor(item.apiPort)
+            : 8000,
+        tcpPort:
+          typeof item.tcpPort === 'number' && Number.isFinite(item.tcpPort)
+            ? Math.floor(item.tcpPort)
+            : 8001,
+        enabled: item.enabled !== false,
+        lastDiscoveredAt:
+          typeof item.lastDiscoveredAt === 'string' && item.lastDiscoveredAt.trim()
+            ? item.lastDiscoveredAt
+            : undefined,
+        lastConnectedAt:
+          typeof item.lastConnectedAt === 'string' && item.lastConnectedAt.trim()
+            ? item.lastConnectedAt
+            : undefined,
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+      }))
+    : [];
+
+  const uniqueChronicleIds = new Set<string>();
+  for (const chronicle of chronicles) {
+    if (uniqueChronicleIds.has(chronicle.id)) {
+      return { ok: false, error: `CHRONICLE IDが重複しています: ${chronicle.id}` };
+    }
+    uniqueChronicleIds.add(chronicle.id);
+  }
 
   const uniqueDomainIds = new Set<string>();
   for (const domain of domains) {
@@ -608,10 +836,19 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
         };
       }
     }
+
+    for (const chronicleId of domain.chronicleIds || []) {
+      if (!uniqueChronicleIds.has(chronicleId)) {
+        return {
+          ok: false,
+          error: `ドメイン「${domain.name}」が存在しないCHRONICLE IDを参照しています: ${chronicleId}`,
+        };
+      }
+    }
   }
 
   try {
-    writeStoreToFile({ knowledges, domains });
+    writeStoreToFile({ knowledges, domains, chronicles });
 
     // 発音辞書が含まれていれば復元
     if (Array.isArray(pronunciationsRaw) && pronunciationsRaw.length > 0) {

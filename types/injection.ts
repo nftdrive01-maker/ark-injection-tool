@@ -36,6 +36,18 @@ export interface InjectionInterceptResponse {
   /** ユーザーの入力テキストに追加するコンテキスト */
   injectedUserContext?: string;
 
+  /** CHRONICLEの応答（表示用。system promptには混ぜない） */
+  chronicle?: {
+    /** タイトルチップ表示用ラベル */
+    title?: string;
+
+    /** CHRONICLEの生応答 */
+    content?: string;
+
+    /** CHRONICLE名 */
+    sourceName?: string;
+  };
+
   /** メタデータ（アセット、キャッシュTTL等） */
   metadata?: {
     /** 参照したドメインID */
@@ -61,6 +73,27 @@ export interface InjectionInterceptResponse {
 
     /** MCP実行時のエラー（fail-open時の診断用） */
     mcpError?: string;
+
+    /** CHRONICLEを実行したか */
+    chronicleUsed?: boolean;
+
+    /** 実行したCHRONICLE名 */
+    chronicleName?: string;
+
+    /** CHRONICLE実行時のエラー */
+    chronicleError?: string;
+
+    /** ドメインに有効なCHRONICLEが接続されているか */
+    chronicleAttached?: boolean;
+
+    /** 今回の入力でCHRONICLE明示トリガーが検出されたか */
+    chronicleTriggered?: boolean;
+
+    /** 厳格なFetch形式を要求したか */
+    strictFetchRequired?: boolean;
+
+    /** 厳格なFetch形式の注入を行ったか */
+    strictFetchInjected?: boolean;
   };
 
   /** エラー時のメッセージ（内部ログ用） */
