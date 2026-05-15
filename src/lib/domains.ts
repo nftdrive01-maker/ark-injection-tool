@@ -46,6 +46,12 @@ export interface Domain {
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   ttsMuted?: boolean;
+  gazeWakeEnabled?: boolean;
+  gazeHoldMs?: number;
+  gazeReleaseMs?: number;
+  gazeCooldownMs?: number;
+  gazeGreetings?: string[];
+  gazeDebugUiEnabled?: boolean;
   imageAvatarIdleUrl?: string;
   imageAvatarTalkUrl?: string;
   imageAvatarTalkIntervalMs?: number;
@@ -108,6 +114,16 @@ const DEFAULT_KNOWLEDGE_PRIORITY = parseInt(
   process.env.INJECTION_DEFAULT_KNOWLEDGE_PRIORITY || '100',
   10
 );
+
+const DEFAULT_GAZE_HOLD_MS = 1500;
+const DEFAULT_GAZE_RELEASE_MS = 1000;
+const DEFAULT_GAZE_COOLDOWN_MS = 10000;
+const DEFAULT_GAZE_GREETINGS = [
+  '何か御用がありますか？',
+  'お待ちしていました。どうしましたか？',
+  'こんにちは。必要なことがあれば教えてください。',
+  '目が合いましたね。今日は何をお手伝いしましょうか？',
+];
 
 function sanitizeId(value: string, fallback: string): string {
   const normalized = value
@@ -476,6 +492,11 @@ export function createDomain(input: {
   imageAvatarTalkUrl?: string;
   imageAvatarTalkIntervalMs?: number;
   ttsMuted?: boolean;
+  gazeWakeEnabled?: boolean;
+  gazeHoldMs?: number;
+  gazeReleaseMs?: number;
+  gazeCooldownMs?: number;
+  gazeGreetings?: string[];
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   knowledgeIds?: string[];
@@ -515,6 +536,26 @@ export function createDomain(input: {
     imageAvatarTalkIntervalMs:
       typeof input.imageAvatarTalkIntervalMs === 'number' ? input.imageAvatarTalkIntervalMs : 180,
     ttsMuted: typeof input.ttsMuted === 'boolean' ? input.ttsMuted : undefined,
+    gazeWakeEnabled: typeof input.gazeWakeEnabled === 'boolean' ? input.gazeWakeEnabled : true,
+    gazeHoldMs:
+      typeof input.gazeHoldMs === 'number' && input.gazeHoldMs > 0
+        ? input.gazeHoldMs
+        : DEFAULT_GAZE_HOLD_MS,
+    gazeReleaseMs:
+      typeof input.gazeReleaseMs === 'number' && input.gazeReleaseMs > 0
+        ? input.gazeReleaseMs
+        : DEFAULT_GAZE_RELEASE_MS,
+    gazeCooldownMs:
+      typeof input.gazeCooldownMs === 'number' && input.gazeCooldownMs > 0
+        ? input.gazeCooldownMs
+        : DEFAULT_GAZE_COOLDOWN_MS,
+    gazeGreetings:
+      Array.isArray(input.gazeGreetings) && input.gazeGreetings.length > 0
+        ? input.gazeGreetings
+            .filter((phrase) => typeof phrase === 'string')
+            .map((phrase) => phrase.trim())
+            .filter(Boolean)
+        : [...DEFAULT_GAZE_GREETINGS],
     stylebertvits2ModelId: input.stylebertvits2ModelId || '',
     stylebertvits2Style: input.stylebertvits2Style || '',
     knowledgeIds,
@@ -561,10 +602,16 @@ export function getDomainOptions(): Array<{
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   ttsMuted?: boolean;
+  gazeWakeEnabled?: boolean;
+  gazeHoldMs?: number;
+  gazeReleaseMs?: number;
+  gazeCooldownMs?: number;
+  gazeGreetings?: string[];
   imageAvatarIdleUrl?: string;
   imageAvatarTalkUrl?: string;
   imageAvatarTalkIntervalMs?: number;
   chronicleIds?: string[];
+  gazeDebugUiEnabled?: boolean;
 }> {
   const store = loadStoreFromFile();
   return store.domains.map((domain) => ({
@@ -578,10 +625,31 @@ export function getDomainOptions(): Array<{
     stylebertvits2ModelId: domain.stylebertvits2ModelId || '',
     stylebertvits2Style: domain.stylebertvits2Style || '',
     ttsMuted: domain.ttsMuted,
+    gazeWakeEnabled: domain.gazeWakeEnabled ?? true,
+    gazeHoldMs:
+      typeof domain.gazeHoldMs === 'number' && domain.gazeHoldMs > 0
+        ? domain.gazeHoldMs
+        : DEFAULT_GAZE_HOLD_MS,
+    gazeReleaseMs:
+      typeof domain.gazeReleaseMs === 'number' && domain.gazeReleaseMs > 0
+        ? domain.gazeReleaseMs
+        : DEFAULT_GAZE_RELEASE_MS,
+    gazeCooldownMs:
+      typeof domain.gazeCooldownMs === 'number' && domain.gazeCooldownMs > 0
+        ? domain.gazeCooldownMs
+        : DEFAULT_GAZE_COOLDOWN_MS,
+    gazeGreetings:
+      Array.isArray(domain.gazeGreetings) && domain.gazeGreetings.length > 0
+        ? domain.gazeGreetings
+            .filter((phrase) => typeof phrase === 'string')
+            .map((phrase) => phrase.trim())
+            .filter(Boolean)
+        : [...DEFAULT_GAZE_GREETINGS],
     imageAvatarIdleUrl: domain.imageAvatarIdleUrl || '',
     imageAvatarTalkUrl: domain.imageAvatarTalkUrl || '',
     imageAvatarTalkIntervalMs: domain.imageAvatarTalkIntervalMs || 180,
     chronicleIds: Array.isArray(domain.chronicleIds) ? domain.chronicleIds : [],
+    gazeDebugUiEnabled: typeof domain.gazeDebugUiEnabled === 'boolean' ? domain.gazeDebugUiEnabled : undefined,
   }));
 }
 

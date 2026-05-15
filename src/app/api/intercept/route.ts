@@ -59,7 +59,7 @@ function requiresStrictFetchFormat(userText: string): boolean {
 const CHRONICLE_TRIGGER_MARKER = '[[USE_CHRONICLE]]';
 
 function sanitizeChronicleMessage(userText: string): string {
-  const normalized = (userText || '').replaceAll(CHRONICLE_TRIGGER_MARKER, '').trim();
+  const normalized = (userText || '').split(CHRONICLE_TRIGGER_MARKER).join('').trim();
   return normalized || userText;
 }
 

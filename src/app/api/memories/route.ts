@@ -146,8 +146,8 @@ export async function GET(req: NextRequest) {
         : [];
     
     const memories = shouldExport
-      ? rawMemories.map((item) => enrichMemoryWithOnchainInfo(item))
-      : rawMemories.map((item) => normalizeMemory(item));
+      ? rawMemories.map((item: unknown) => enrichMemoryWithOnchainInfo(item as BeyondCoreMemoryExport))
+      : rawMemories.map((item: unknown) => normalizeMemory(item));
 
     return NextResponse.json({ memories }, { status: 200 });
   } catch (err) {

@@ -18,9 +18,16 @@ interface Domain {
   imageAvatarTalkUrl?: string;
   imageAvatarTalkIntervalMs?: number;
   ttsMuted?: boolean;
+  gazeWakeEnabled?: boolean;
+  gazeHoldMs?: number;
+  gazeReleaseMs?: number;
+  gazeCooldownMs?: number;
+  gazeGreetings?: string[];
+  gazeDebugUiEnabled?: boolean;
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   knowledgeIds: string[];
+  memoryIds?: string[];
   mcpServerIds?: string[];
   chronicleIds?: string[];
   systemPrompt: string;
@@ -158,6 +165,13 @@ interface MCPServer {
 }
 
 type AssetType = 'vrm' | 'bgimage';
+
+const DEFAULT_GAZE_GREETINGS = [
+  '何か御用がありますか？',
+  'お待ちしていました。どうしましたか？',
+  'こんにちは。必要なことがあれば教えてください。',
+  '目が合いましたね。今日は何をお手伝いしましょうか？',
+];
 
 const DANGER_LINE_PERCENT = 90;
 const WARNING_LINE_PERCENT = 75;
@@ -3242,6 +3256,163 @@ export default function AdminPage() {
                     </select>
                     <div style={{ marginTop: '6px', fontSize: '12px', color: '#666' }}>
                       未設定なら現在のグローバル TTS 設定をそのまま使います。
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '16px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px', backgroundColor: '#fff' }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>視線起動（ドメイン別）</div>
+
+                    <div style={{ marginBottom: '12px' }}>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedDomain.gazeWakeEnabled ?? true}
+                          onChange={(e) =>
+                            setSelectedDomain({ ...selectedDomain, gazeWakeEnabled: e.target.checked })
+                          }
+                        />
+                        視線起動を有効にする
+                      </label>
+                    </div>
+
+                    <div style={{ marginBottom: '12px' }}>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          fontSize: '0.9em',
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedDomain.gazeDebugUiEnabled ?? false}
+                          onChange={(e) =>
+                            setSelectedDomain({ ...selectedDomain, gazeDebugUiEnabled: e.target.checked })
+                          }
+                        />
+                        視線起動デバッグ表示を有効にする
+                      </label>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                          起動感度 holdMs
+                        </label>
+                        <input
+                          type="number"
+                          min={500}
+                          max={5000}
+                          step={100}
+                          value={selectedDomain.gazeHoldMs ?? 1500}
+                          onChange={(e) =>
+                            setSelectedDomain({
+                              ...selectedDomain,
+                              gazeHoldMs: Math.max(500, Math.min(5000, parseInt(e.target.value || '1500', 10))),
+                            })
+                          }
+                          style={{
+                            width: '100%',
+                            padding: '8px',
+                            border: '1px solid #ddd',
+                            borderRadius: '4px',
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                          リリース時間 releaseMs
+                        </label>
+                        <input
+                          type="number"
+                          min={300}
+                          max={5000}
+                          step={100}
+                          value={selectedDomain.gazeReleaseMs ?? 1000}
+                          onChange={(e) =>
+                            setSelectedDomain({
+                              ...selectedDomain,
+                              gazeReleaseMs: Math.max(300, Math.min(5000, parseInt(e.target.value || '1000', 10))),
+                            })
+                          }
+                          style={{
+                            width: '100%',
+                            padding: '8px',
+                            border: '1px solid #ddd',
+                            borderRadius: '4px',
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                          再起動クールダウン cooldownMs
+                        </label>
+                        <input
+                          type="number"
+                          min={3000}
+                          max={30000}
+                          step={500}
+                          value={selectedDomain.gazeCooldownMs ?? 10000}
+                          onChange={(e) =>
+                            setSelectedDomain({
+                              ...selectedDomain,
+                              gazeCooldownMs: Math.max(3000, Math.min(30000, parseInt(e.target.value || '10000', 10))),
+                            })
+                          }
+                          style={{
+                            width: '100%',
+                            padding: '8px',
+                            border: '1px solid #ddd',
+                            borderRadius: '4px',
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                        開始発話テンプレート（1行1パターン）
+                      </label>
+                      <textarea
+                        value={
+                          (selectedDomain.gazeGreetings && selectedDomain.gazeGreetings.length > 0
+                            ? selectedDomain.gazeGreetings
+                            : DEFAULT_GAZE_GREETINGS
+                          ).join('\n')
+                        }
+                        onChange={(e) => {
+                          const phrases = e.target.value
+                            .split(/\r?\n/)
+                            .map((phrase) => phrase.trim())
+                            .filter(Boolean);
+                          setSelectedDomain({
+                            ...selectedDomain,
+                            gazeGreetings: phrases.length > 0 ? phrases : [...DEFAULT_GAZE_GREETINGS],
+                          });
+                        }}
+                        rows={4}
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
                     </div>
                   </div>
 

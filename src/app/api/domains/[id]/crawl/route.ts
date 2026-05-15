@@ -26,7 +26,6 @@ function buildSystemPromptFromCrawl(rawContent: string, siteUrl: string): string
   }
 
   const lines = rawContent.split('\n').filter((l) => l.trim().length > 0);
-  const titleLine = lines.find((l) => l.startsWith('起点URL:'));
   const pageCountLine = lines.find((l) => l.startsWith('取得ページ数:'));
   const pageCount = pageCountLine ? pageCountLine.replace('取得ページ数:', '').trim() : '不明';
 
