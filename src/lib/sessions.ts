@@ -10,6 +10,7 @@ interface Session {
   domainId: string;
   createdAt: number;
   lastHeartbeat: number;
+  attachedPackIds: string[];
 }
 
 // プロセス単位のグローバルストア
@@ -67,6 +68,7 @@ export function acquireSession(
     domainId,
     createdAt: now,
     lastHeartbeat: now,
+    attachedPackIds: [],
   });
 
   return { acquired: true, sessionId, current: current + 1 };
@@ -79,6 +81,57 @@ export function heartbeatSession(sessionId: string): boolean {
   const session = sessions.get(sessionId);
   if (!session) return false;
   session.lastHeartbeat = Date.now();
+  return true;
+}
+
+function normalizePackId(packId: string): string {
+  return (packId || '').trim().toLowerCase();
+}
+
+export function getAttachedPackIds(sessionId: string): string[] {
+  const session = sessions.get(sessionId);
+  if (!session) return [];
+  return [...session.attachedPackIds];
+}
+
+export function getSessionDomainId(sessionId: string): string | undefined {
+  const session = sessions.get(sessionId);
+  return session?.domainId;
+}
+
+export function attachPackToSession(sessionId: string, packId: string): { ok: boolean; attachedPackIds: string[] } {
+  const session = sessions.get(sessionId);
+  if (!session) {
+    return { ok: false, attachedPackIds: [] };
+  }
+
+  const normalized = normalizePackId(packId);
+  if (!normalized) {
+    return { ok: false, attachedPackIds: [...session.attachedPackIds] };
+  }
+
+  if (!session.attachedPackIds.includes(normalized)) {
+    session.attachedPackIds.push(normalized);
+  }
+
+  return { ok: true, attachedPackIds: [...session.attachedPackIds] };
+}
+
+export function detachPackFromSession(sessionId: string, packId: string): { ok: boolean; attachedPackIds: string[] } {
+  const session = sessions.get(sessionId);
+  if (!session) {
+    return { ok: false, attachedPackIds: [] };
+  }
+
+  const normalized = normalizePackId(packId);
+  session.attachedPackIds = session.attachedPackIds.filter((id) => id !== normalized);
+  return { ok: true, attachedPackIds: [...session.attachedPackIds] };
+}
+
+export function clearAttachedPacks(sessionId: string): boolean {
+  const session = sessions.get(sessionId);
+  if (!session) return false;
+  session.attachedPackIds = [];
   return true;
 }
 

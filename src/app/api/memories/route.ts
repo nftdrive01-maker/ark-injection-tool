@@ -94,6 +94,49 @@ function buildBeyondCoreMemoriesExportUrl(host: string, apiPort: number): string
   return `${normalizedHost}:${apiPort}/api/memories/export`;
 }
 
+async function fetchMemoriesFromChronicle(
+  chronicle: { host: string; apiPort: number },
+  shouldExport: boolean
+): Promise<{ ok: true; memories: Array<BeyondCoreMemory | MemoryWithOnchainInfo> } | { ok: false; error: string }> {
+  const memoriesUrl = shouldExport
+    ? buildBeyondCoreMemoriesExportUrl(chronicle.host, chronicle.apiPort)
+    : buildBeyondCoreMemoriesUrl(chronicle.host, chronicle.apiPort);
+
+  try {
+    const response = await fetch(memoriesUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      return {
+        ok: false,
+        error: `BEYOND Core ${memoriesUrl} 呼び出しに失敗しました: ${response.status} ${errorText}`,
+      };
+    }
+
+    const payload = await response.json().catch(() => null);
+    const rawMemories = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.memories)
+        ? payload.memories
+        : [];
+
+    const memories = shouldExport
+      ? rawMemories.map((item: unknown) => enrichMemoryWithOnchainInfo(item as BeyondCoreMemoryExport))
+      : rawMemories.map((item: unknown) => normalizeMemory(item));
+
+    return { ok: true, memories };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `BEYOND Core 接続エラー: ${message}` };
+  }
+}
+
 export async function GET(req: NextRequest) {
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: '認証が必須です' }, { status: 401 });
@@ -109,50 +152,33 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ memories: [] }, { status: 200 });
     }
 
-    // Use the requested chronicle when provided, otherwise fallback to enabled/first
-    const chronicle = chronicleId
-      ? chronicles.find((c) => c.id === chronicleId)
-      : (chronicles.find((c) => c.enabled) || chronicles[0]);
-    if (!chronicle) {
+    // Use requested chronicle when provided; otherwise try enabled chronicles first.
+    const candidates = chronicleId
+      ? chronicles.filter((c) => c.id === chronicleId)
+      : [...chronicles].sort((a, b) => Number(b.enabled) - Number(a.enabled));
+
+    if (candidates.length === 0) {
       return NextResponse.json({ error: '指定されたCHRONICLEが見つかりません' }, { status: 404 });
     }
 
-    // Choose the appropriate endpoint based on the export flag
-    const memoriesUrl = shouldExport
-      ? buildBeyondCoreMemoriesExportUrl(chronicle.host, chronicle.apiPort)
-      : buildBeyondCoreMemoriesUrl(chronicle.host, chronicle.apiPort);
-    
-    const response = await fetch(memoriesUrl, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-      cache: 'no-store',
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      return NextResponse.json(
-        { error: `BEYOND Core ${memoriesUrl} 呼び出しに失敗しました: ${response.status} ${errorText}` },
-        { status: 502 }
-      );
+    const errors: string[] = [];
+    for (const candidate of candidates) {
+      const result = await fetchMemoriesFromChronicle(candidate, shouldExport);
+      if (result.ok) {
+        return NextResponse.json({ memories: result.memories }, { status: 200 });
+      }
+      errors.push(result.error);
     }
 
-    const payload = await response.json().catch(() => null);
-    const rawMemories = Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload?.memories)
-        ? payload.memories
-        : [];
-    
-    const memories = shouldExport
-      ? rawMemories.map((item: unknown) => enrichMemoryWithOnchainInfo(item as BeyondCoreMemoryExport))
-      : rawMemories.map((item: unknown) => normalizeMemory(item));
-
-    return NextResponse.json({ memories }, { status: 200 });
+    // Keep admin UI stable even if CHRONICLE is currently unreachable.
+    console.warn('Get memories fallback to empty:', errors.join(' | '));
+    return NextResponse.json(
+      { memories: [], warning: 'CHRONICLE未接続のため空データを返却しました', details: errors },
+      { status: 200 }
+    );
   } catch (err) {
     console.error('Get memories error:', err);
-    return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });
+    return NextResponse.json({ memories: [], warning: 'サーバーエラーのため空データを返却しました' }, { status: 200 });
   }
 }
 

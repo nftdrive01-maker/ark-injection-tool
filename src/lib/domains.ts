@@ -7,6 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { type PronunciationRule, getAllPronunciationRules, setAllPronunciationRules } from './pronunciations';
+import { type DomainAccessUser, normalizeStoredAccessUsers } from './domain-access-auth';
 
 export interface Knowledge {
   id: string;
@@ -37,9 +38,13 @@ export interface Domain {
   name: string;
   description: string;
   enabled?: boolean;
+  sharedLogEnabled?: boolean;
+  accessControlEnabled?: boolean;
+  accessUsers?: DomainAccessUser[];
   baseSystemPrompt: string;
   baseContext: string;
   bgUrl?: string;
+  themeColor?: string;
   characterName?: string;
   vrmEnabled?: boolean;
   vrmUrl?: string;
@@ -125,6 +130,23 @@ const DEFAULT_GAZE_GREETINGS = [
   '目が合いましたね。今日は何をお手伝いしましょうか？',
 ];
 
+function sanitizeThemeColor(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const trimmed = value.trim();
+  if (!/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed)) {
+    return '';
+  }
+
+  if (trimmed.length === 4) {
+    return `#${trimmed[1]}${trimmed[1]}${trimmed[2]}${trimmed[2]}${trimmed[3]}${trimmed[3]}`.toLowerCase();
+  }
+
+  return trimmed.toLowerCase();
+}
+
 function sanitizeId(value: string, fallback: string): string {
   const normalized = value
     .trim()
@@ -155,6 +177,8 @@ function loadStoreFromFile(): KnowledgeDomainStore {
         knowledges: parsed.knowledges as Knowledge[],
         domains: (parsed.domains as Domain[]).map((domain) => ({
           ...domain,
+          accessControlEnabled: domain.accessControlEnabled === true,
+          accessUsers: normalizeStoredAccessUsers(domain.accessUsers),
           chronicleIds: Array.isArray(domain.chronicleIds) ? domain.chronicleIds : [],
         })),
         chronicles: Array.isArray(parsed.chronicles) ? parsed.chronicles as Chronicle[] : [],
@@ -246,9 +270,13 @@ function getDefaultStore(): KnowledgeDomainStore {
       name: DEFAULT_DOMAIN_NAME,
       description: DEFAULT_DOMAIN_DESCRIPTION,
       enabled: true,
+      sharedLogEnabled: false,
+      accessControlEnabled: false,
+      accessUsers: [],
       baseSystemPrompt: DEFAULT_DOMAIN_BASE_SYSTEM_PROMPT,
       baseContext: DEFAULT_DOMAIN_BASE_CONTEXT,
       bgUrl: '',
+      themeColor: '',
       characterName: '',
       vrmEnabled: true,
       vrmUrl: '',
@@ -360,6 +388,21 @@ export function updateDomain(id: string, updates: Partial<Domain>): ResolvedDoma
     ...store.domains[index],
     ...updates,
     id: store.domains[index].id,
+    sharedLogEnabled:
+      typeof updates.sharedLogEnabled === 'boolean'
+        ? updates.sharedLogEnabled
+        : store.domains[index].sharedLogEnabled ?? false,
+    accessControlEnabled:
+      typeof updates.accessControlEnabled === 'boolean'
+        ? updates.accessControlEnabled
+        : store.domains[index].accessControlEnabled ?? false,
+    accessUsers: Array.isArray(updates.accessUsers)
+      ? normalizeStoredAccessUsers(updates.accessUsers)
+      : normalizeStoredAccessUsers(store.domains[index].accessUsers),
+    themeColor:
+      typeof updates.themeColor === 'string'
+        ? sanitizeThemeColor(updates.themeColor)
+        : sanitizeThemeColor(store.domains[index].themeColor),
     knowledgeIds: Array.isArray(updates.knowledgeIds)
       ? updates.knowledgeIds
       : store.domains[index].knowledgeIds,
@@ -482,9 +525,13 @@ export function createDomain(input: {
   name: string;
   description?: string;
   enabled?: boolean;
+  sharedLogEnabled?: boolean;
+  accessControlEnabled?: boolean;
+  accessUsers?: DomainAccessUser[];
   baseSystemPrompt?: string;
   baseContext?: string;
   bgUrl?: string;
+  themeColor?: string;
   characterName?: string;
   vrmEnabled?: boolean;
   vrmUrl?: string;
@@ -525,9 +572,13 @@ export function createDomain(input: {
     name: input.name,
     description: input.description || '',
     enabled: input.enabled ?? true,
+    sharedLogEnabled: input.sharedLogEnabled ?? false,
+    accessControlEnabled: input.accessControlEnabled ?? false,
+    accessUsers: normalizeStoredAccessUsers(input.accessUsers),
     baseSystemPrompt: input.baseSystemPrompt || '',
     baseContext: input.baseContext || '',
     bgUrl: input.bgUrl || '',
+    themeColor: sanitizeThemeColor(input.themeColor),
     characterName: input.characterName || '',
     vrmEnabled: input.vrmEnabled ?? true,
     vrmUrl: input.vrmUrl || '',
@@ -595,7 +646,12 @@ export function getDomainOptions(): Array<{
   id: string;
   name: string;
   enabled?: boolean;
+  sharedLogEnabled?: boolean;
+  accessControlEnabled?: boolean;
+  knowledgeIds?: string[];
+  mcpServerIds?: string[];
   bgUrl?: string;
+  themeColor?: string;
   characterName?: string;
   vrmEnabled?: boolean;
   vrmUrl?: string;
@@ -618,7 +674,12 @@ export function getDomainOptions(): Array<{
     id: domain.id,
     name: domain.name,
     enabled: domain.enabled ?? true,
+    sharedLogEnabled: domain.sharedLogEnabled ?? false,
+    accessControlEnabled: domain.accessControlEnabled === true,
+    knowledgeIds: Array.isArray(domain.knowledgeIds) ? domain.knowledgeIds : [],
+    mcpServerIds: Array.isArray(domain.mcpServerIds) ? domain.mcpServerIds : [],
     bgUrl: domain.bgUrl || '',
+    themeColor: sanitizeThemeColor(domain.themeColor),
     characterName: domain.characterName || '',
     vrmEnabled: domain.vrmEnabled ?? true,
     vrmUrl: domain.vrmUrl || '',
@@ -827,6 +888,7 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
     baseSystemPrompt: typeof item.baseSystemPrompt === 'string' ? item.baseSystemPrompt : '',
     baseContext: typeof item.baseContext === 'string' ? item.baseContext : '',
     bgUrl: typeof item.bgUrl === 'string' ? item.bgUrl : undefined,
+    themeColor: sanitizeThemeColor(item.themeColor),
     characterName: typeof item.characterName === 'string' ? item.characterName : undefined,
     vrmEnabled: typeof item.vrmEnabled === 'boolean' ? item.vrmEnabled : undefined,
     vrmUrl: typeof item.vrmUrl === 'string' ? item.vrmUrl : undefined,

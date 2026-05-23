@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
 import { InjectionInterceptRequest, InjectionInterceptResponse } from '@/types/injection';
 import { getChronicleById, getDomainById, getKnowledgeById } from '@/lib/domains';
 import { executeMCPForDomain } from '@/lib/mcp-runtime';
 import { callChronicleChat } from '@/lib/beyond-core-client';
+import { writeDomainSharedLog } from '@/lib/domain-shared-log';
+import {
+  createDomainAccessErrorResponse,
+  getDomainAccessTokenFromRequest,
+  verifyDomainAccessFromToken,
+} from '@/lib/domain-access-control';
+import { getAttachedPackIds } from '@/lib/sessions';
 
 /**
  * 注入インターセプト API
@@ -133,13 +141,335 @@ function _extractSourceUrls(text: string): string[] {
   return urls;
 }
 
+function _isGoogleAuthRequiredOutput(text: string): boolean {
+  if (!text) return false;
+
+  return /(?:ACTION REQUIRED:\s*Google authentication needed|Google\s*アカウントが必要|Open the following URL in your browser|accounts\.google\.com\/(?:oauth2\/auth|o\/oauth2\/auth|o\/oauth2\/v2\/auth))/i.test(text);
+}
+
+function _extractMcpCountSummary(output: string): string | null {
+  if (!output) return null;
+
+  try {
+    const parsed = JSON.parse(output) as {
+      data?: {
+        rows?: Array<Record<string, unknown>>;
+      };
+    };
+
+    const firstRow = Array.isArray(parsed?.data?.rows) ? parsed.data.rows[0] : null;
+    if (!firstRow || typeof firstRow !== 'object') {
+      return null;
+    }
+
+    for (const [key, value] of Object.entries(firstRow)) {
+      if (!/(?:^|_)(?:count|total_count|total|件数|総数)(?:$|_)/i.test(key)) {
+        continue;
+      }
+
+      const normalizedValue = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+      if (!/^\d+(?:\.\d+)?$/.test(normalizedValue)) {
+        continue;
+      }
+
+      return `総件数は ${normalizedValue} 件です。`;
+    }
+
+    return null;
+  } catch {
+    const regexMatch = output.match(/"(?:total_count|count|total)"\s*:\s*"?(\d+(?:\.\d+)?)"?/i);
+    if (!regexMatch?.[1]) {
+      return null;
+    }
+
+    return `総件数は ${regexMatch[1]} 件です。`;
+  }
+}
+
+function _extractNumericCountValue(summary?: string | null): string | null {
+  if (!summary) {
+    return null;
+  }
+
+  const match = summary.match(/(\d+(?:\.\d+)?)\s*件/);
+  return match?.[1] ?? null;
+}
+
+type DbPreviewRow = Record<string, string | number | boolean | null>;
+
+function _normalizeDbPreviewValue(value: unknown): string | number | boolean | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function _normalizeDbQueryText(userText: string): string | undefined {
+  const normalized = userText.replace(/\s+/g, ' ').trim();
+  return normalized || undefined;
+}
+
+function _inferDbSortLabel(userText: string): string | undefined {
+  const normalized = userText.replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (/(家賃|賃料).*(安い順|低い順)|安い順.*(家賃|賃料)/.test(normalized)) {
+    return '家賃が安い順';
+  }
+  if (/(家賃|賃料).*(高い順)|高い順.*(家賃|賃料)/.test(normalized)) {
+    return '家賃が高い順';
+  }
+  if (/(新しい順|築浅順|築年数.*新しい|新着順)/.test(normalized)) {
+    return '築年数が新しい順';
+  }
+  if (/(古い順|築年数.*古い)/.test(normalized)) {
+    return '築年数が古い順';
+  }
+  if (/(広い順|面積.*広い|専有面積.*広い)/.test(normalized)) {
+    return '面積が広い順';
+  }
+  if (/(狭い順|面積.*狭い|専有面積.*狭い)/.test(normalized)) {
+    return '面積が狭い順';
+  }
+  if (/(駅近|徒歩.*短い|近い順|駅から近い)/.test(normalized)) {
+    return '駅から近い順';
+  }
+
+  return undefined;
+}
+
+function _extractDbResultPayload(
+  output: string,
+  userText: string,
+  serverId?: string,
+  serverName?: string,
+  toolName?: string,
+): InjectionInterceptResponse['dbResult'] | undefined {
+  if (!output) {
+    return undefined;
+  }
+
+  if (serverId === 'estat' && toolName === 'search_statistics') {
+    try {
+      const parsed = JSON.parse(output) as Array<{
+        id?: string;
+        name?: string;
+        organization?: string;
+        survey_date?: string;
+      }>;
+
+      const rows = Array.isArray(parsed) ? parsed : [];
+      if (rows.length === 0) {
+        return undefined;
+      }
+
+      const previewRows: DbPreviewRow[] = rows.slice(0, 10).map((row) => ({
+        statsId: typeof row.id === 'string' ? row.id : null,
+        統計表名: typeof row.name === 'string' ? row.name : null,
+        作成機関: typeof row.organization === 'string' ? row.organization : null,
+        調査時点: typeof row.survey_date === 'string' ? row.survey_date : null,
+      }));
+
+      return {
+        title: 'e-Stat検索結果',
+        sourceName: serverName || serverId,
+        toolName,
+        summary: `e-Stat の統計表候補を ${rows.length} 件取得しました。上位 ${previewRows.length} 件を表示しています。`,
+        queryText: _normalizeDbQueryText(userText),
+        totalCount: rows.length,
+        previewColumns: ['statsId', '統計表名', '作成機関', '調査時点'],
+        previewRows,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  if (serverId !== 'dbhub') {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(output) as {
+      data?: {
+        rows?: Array<Record<string, unknown>>;
+      };
+    };
+
+    const rows = Array.isArray(parsed?.data?.rows) ? parsed.data.rows : [];
+    if (rows.length === 0) {
+      return undefined;
+    }
+
+    const firstRow = rows[0] ?? {};
+    const totalCountEntry = Object.entries(firstRow).find(([key, value]) => {
+      if (!/(?:^|_)(?:count|total_count|total|件数|総数)(?:$|_)/i.test(key)) {
+        return false;
+      }
+
+      const normalizedValue = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+      return /^\d+(?:\.\d+)?$/.test(normalizedValue);
+    });
+
+    const totalCount = totalCountEntry
+      ? Number(typeof totalCountEntry[1] === 'number' ? totalCountEntry[1] : String(totalCountEntry[1]).trim())
+      : undefined;
+
+    const previewRowsSource = totalCountEntry ? rows.slice(1) : rows;
+    if (previewRowsSource.length === 0) {
+      return undefined;
+    }
+
+    const previewRows: DbPreviewRow[] = previewRowsSource.map((row) => {
+      const normalized: DbPreviewRow = {};
+      for (const [key, value] of Object.entries(row)) {
+        normalized[key] = _normalizeDbPreviewValue(value);
+      }
+      return normalized;
+    });
+
+    const previewColumns = previewRows.length > 0
+      ? Object.keys(previewRows[0])
+      : Object.keys(firstRow).filter((key) => key !== totalCountEntry?.[0]);
+
+    const summaryParts: string[] = [];
+    if (typeof totalCount === 'number' && Number.isFinite(totalCount)) {
+      summaryParts.push(`検索結果は合計 ${totalCount} 件です。`);
+    }
+    if (previewRows.length > 0) {
+      summaryParts.push(`結果ビューには ${previewRows.length} 件を表示しています。`);
+    }
+    if (previewColumns.length > 0) {
+      summaryParts.push(`主な列は ${previewColumns.slice(0, 6).join('、')} です。`);
+    }
+
+    return {
+      title: 'DB検索結果',
+      sourceName: serverName || serverId,
+      toolName,
+      summary: summaryParts.join(' '),
+      queryText: _normalizeDbQueryText(userText),
+      sortLabel: _inferDbSortLabel(userText),
+      totalCount: typeof totalCount === 'number' && Number.isFinite(totalCount) ? totalCount : undefined,
+      previewColumns,
+      previewRows,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function _formatDbResultForPrompt(dbResult?: InjectionInterceptResponse['dbResult']): string | null {
+  if (!dbResult) {
+    return null;
+  }
+
+  const lines: string[] = [];
+
+  if (typeof dbResult.totalCount === 'number' && Number.isFinite(dbResult.totalCount)) {
+    lines.push(`【総件数】\n${dbResult.totalCount} 件`);
+  }
+
+  if (dbResult.sourceName || dbResult.toolName) {
+    lines.push(`【データソース】\n${dbResult.sourceName || 'dbhub'}${dbResult.toolName ? ` / ${dbResult.toolName}` : ''}`);
+  }
+
+  return lines.length > 0 ? lines.join('\n\n') : null;
+}
+
+function _formatMcpPreviewValue(value: string | number | boolean | null | undefined): string {
+  if (value == null) {
+    return '-';
+  }
+
+  const text = String(value).replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return '-';
+  }
+
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
+function _summarizePreviewRow(row: DbPreviewRow, preferredColumns: string[]): string {
+  const columns = preferredColumns.filter((column) => column in row);
+  const fallbackColumns = Object.keys(row).filter((column) => !columns.includes(column));
+  const selected = [...columns, ...fallbackColumns].slice(0, 4);
+
+  return selected
+    .map((column) => `${column}: ${_formatMcpPreviewValue(row[column])}`)
+    .join(' / ');
+}
+
+function _buildMcpReactionPrompt(params: {
+  userText: string;
+  serverId?: string;
+  toolName?: string;
+  dbResult?: InjectionInterceptResponse['dbResult'];
+}): string | null {
+  const { userText, serverId, toolName, dbResult } = params;
+  if (!dbResult || !Array.isArray(dbResult.previewRows) || dbResult.previewRows.length === 0) {
+    return null;
+  }
+
+  const totalCount = typeof dbResult.totalCount === 'number' && Number.isFinite(dbResult.totalCount)
+    ? dbResult.totalCount
+    : dbResult.previewRows.length;
+
+  const isSearchLike = serverId === 'estat'
+    || toolName === 'search_objects'
+    || (toolName === 'execute_sql' && dbResult.previewRows.length > 1);
+
+  const preferredColumns = serverId === 'estat'
+    ? ['統計表名', '作成機関', '調査時点', 'statsId']
+    : ['title', 'name', 'city', 'ward', 'rent', 'id'];
+
+  const topSummaries = dbResult.previewRows
+    .slice(0, 5)
+    .map((row, index) => `- 候補${index + 1}: ${_summarizePreviewRow(row, preferredColumns)}`)
+    .join('\n');
+
+  const reactionGuide = isSearchLike
+    ? 'ユーザーに、あなた自身が検索して上位候補を見つけてきたように自然に報告してください。候補一覧を全文読み上げたり、そのまま列挙したりしてはいけません。どんな候補が見つかったかの傾向を短く伝え、必要なら次の絞り込み方を1つか2つ提案してください。回答は2〜4文程度に収めてください。'
+    : 'ユーザーに、あなた自身が結果を確認してきたように自然に報告してください。表や一覧の全文を読み上げず、要点・傾向・次の見方を短く案内してください。回答は2〜4文程度に収めてください。';
+
+  return `
+====================
+【MCPリアクション用要約】
+ユーザーの質問:
+${userText}
+
+返ってきた結果件数:
+${totalCount}件
+
+上位候補の要約（最大5件）:
+${topSummaries}
+
+【リアクション指示】
+${reactionGuide}
+- UIには結果パネルが表示されている前提で話してください
+- statsIdやレコードIDの羅列は避けてください
+- 取得できていない事実を推測で補わないでください
+`;
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 200,
     headers: {
       'Access-Control-Allow-Origin': CLIENT_ORIGIN,
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, x-user-id, x-domain-access-token',
       'Access-Control-Max-Age': '86400',
     },
   });
@@ -150,7 +480,7 @@ export async function POST(req: NextRequest) {
   const corsHeaders = {
     'Access-Control-Allow-Origin': CLIENT_ORIGIN,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, x-user-id, x-domain-access-token',
   };
 
   try {
@@ -167,6 +497,10 @@ export async function POST(req: NextRequest) {
     }
 
     const { userText, domainId } = body;
+    const requestId = (body.requestId || '').trim() || randomUUID();
+    const sessionId = (body.sessionId || '').trim();
+    const headerUserId = req.headers.get('x-user-id') || '';
+    const userId = headerUserId.trim() || (sessionId ? `anonymous:${sessionId}` : 'anonymous:unknown-session');
 
     // userText が必須
     if (!userText) {
@@ -186,6 +520,11 @@ export async function POST(req: NextRequest) {
         status: 200,
         headers: corsHeaders,
       });
+    }
+
+    const accessResult = verifyDomainAccessFromToken(targetDomainId, getDomainAccessTokenFromRequest(req));
+    if (!accessResult.ok) {
+      return createDomainAccessErrorResponse(accessResult.reason, corsHeaders);
     }
 
     const firstChronicleId = Array.isArray(domain.chronicleIds) && domain.chronicleIds.length > 0
@@ -256,9 +595,18 @@ ${knowledge.context || ''}
       }
     }
 
+    // attachedPackIds from client request are intentionally ignored.
+    // Server-side session attach store is the source of truth.
+    const attachedPackIds = sessionId ? getAttachedPackIds(sessionId) : [];
+    const resolvedMcpServerIds = [...(domain.mcpServerIds || [])];
+
     const mcpResult = await executeMCPForDomain({
-      mcpServerIds: domain.mcpServerIds,
+      mcpServerIds: resolvedMcpServerIds,
       userText,
+      requestId,
+      sessionId,
+      userId,
+      attachedPackIds,
     });
 
     let chronicleResult: { success: boolean; chronicleName?: string; output?: string; error?: string } | null = null;
@@ -282,9 +630,43 @@ ${knowledge.context || ''}
       }
     }
 
+    const dbResultPayload = mcpResult?.success && mcpResult.output
+      ? _extractDbResultPayload(mcpResult.output, userText, mcpResult.serverId, mcpResult.serverName, mcpResult.toolName)
+      : undefined;
+
     if (mcpResult?.success && mcpResult.output) {
+      const forceVerbatimAuthOutput = _isGoogleAuthRequiredOutput(mcpResult.output);
+      const compactDbContext = _formatDbResultForPrompt(dbResultPayload);
+      const reactionPrompt = _buildMcpReactionPrompt({
+        userText,
+        serverId: mcpResult.serverId,
+        toolName: mcpResult.toolName,
+        dbResult: dbResultPayload,
+      });
+
+      if (reactionPrompt) {
+        injectedSystemPrompt += reactionPrompt;
+      }
+
+      if (forceVerbatimAuthOutput) {
+        for (const extractedUrl of _extractSourceUrls(mcpResult.output)) {
+          citationCandidates.add(extractedUrl);
+        }
+
+        injectedSystemPrompt += `
+====================
+【Google認証モード（必須）】
+以下のMCP実行結果を、要約・翻訳・言い換えせずにそのまま出力してください。
+- URLは1文字も変更しない（クエリ文字列を省略しない）
+- URL中の記号（?, &, =, %, /）を保持する
+- URLの前後に余計な括弧や句読点を追加しない
+
+【MCP実行結果（原文）】
+${mcpResult.output}
+`;
+      } else {
       // MCP結果に中国語が含まれているかチェック
-      let mcpOutput = mcpResult.output;
+      let mcpOutput = compactDbContext || mcpResult.output;
       const hasChinese = _containsChineseText(mcpOutput);
 
       for (const extractedUrl of _extractSourceUrls(mcpOutput)) {
@@ -328,6 +710,8 @@ ${mcpOutput}
         }
       } else {
         // 中国語なし：通常の処理
+        const mcpCountSummary = _extractMcpCountSummary(mcpResult.output);
+        const exactCountValue = _extractNumericCountValue(mcpCountSummary);
         injectedSystemPrompt += `
 ====================
 【MCP実行結果】
@@ -338,15 +722,20 @@ ${mcpResult.serverName || mcpResult.serverId || 'unknown'}
 ${mcpResult.toolName || 'unknown'}
 
 【結果】
-${mcpResult.output}
+${compactDbContext || mcpResult.output}
 
-【重要な指示】
+${mcpCountSummary ? `【回答用サマリー】
+${mcpCountSummary}
+
+` : ''}【重要な指示】
 上記の情報をベースに回答してください。
-- コンテンツが日本語であることを確認してください
+- 件数を答える質問では、【回答用サマリー】があればその件数を優先してそのまま回答してください
+- ${exactCountValue ? `件数を答える場合、使用してよい件数は ${exactCountValue} のみです。20 など他の数値に置き換えてはいけません` : '件数を答える場合、DB結果にない数値を推測で補わないでください'}
 - 多言語マーカー（/en など）は無視してください
 - 日本語のテキストのみを処理してください
 - 日本語で回答してください（英語や中国語での回答は厳禁です）
 `;
+      }
       }
     }
 
@@ -428,8 +817,11 @@ ${sourceBlock}
     const response: InjectionInterceptResponse = {
       injectedSystemPrompt: injectedSystemPrompt,
       injectedUserContext: '', // 空（system に統合済み）
+      dbResult: dbResultPayload,
       chronicle: chroniclePayload,
       metadata: {
+        requestId,
+        sessionId,
         domainId: domain.id,
         ttl: domain.ttl,
         version: domain.version,
@@ -437,6 +829,8 @@ ${sourceBlock}
         mcpServerId: mcpResult?.serverId,
         mcpToolName: mcpResult?.toolName,
         mcpError: mcpResult && !mcpResult.success ? mcpResult.error : undefined,
+        mcpErrorCode: mcpResult && !mcpResult.success ? mcpResult.errorCode : undefined,
+        attachedPackIds,
         chronicleUsed: Boolean(chronicleResult?.success),
         chronicleName: chronicleResult?.chronicleName,
         chronicleError: chronicleResult && !chronicleResult.success ? chronicleResult.error : undefined,
@@ -446,6 +840,24 @@ ${sourceBlock}
         strictFetchInjected: strictFetchRequired,
       },
     };
+
+    if (domain.sharedLogEnabled) {
+      try {
+        await writeDomainSharedLog({
+          domainId: domain.id,
+          requestId,
+          sessionId: sessionId || null,
+          userId,
+          userText,
+          requestBody: body,
+          responseBody: response,
+          mcpResult,
+          chronicleResult,
+        });
+      } catch (logError) {
+        console.error('Shared log write error:', logError);
+      }
+    }
 
     return NextResponse.json(response, {
       status: 200,

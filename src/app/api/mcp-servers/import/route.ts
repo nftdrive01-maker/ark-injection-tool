@@ -186,8 +186,15 @@ export async function POST(request: NextRequest) {
  */
 async function fetchMCPServerMetadata(url: string): Promise<ServerMetadata | null> {
   try {
+    // Docker環境では localhost を内部サービス名に置換
+    const internalBase = process.env.INJECTION_MCP_INTERNAL_BASE_URL || 'http://mcp-server:8000';
+    let resolvedUrl = url;
+    if (internalBase) {
+      resolvedUrl = url.replace(/^https?:\/\/localhost(:\d+)?/, internalBase);
+    }
+
     // SSE トランスポートでMCPサーバーに接続
-    const transport = new SSEClientTransport(new URL(url));
+    const transport = new SSEClientTransport(new URL(resolvedUrl));
     const client = new Client({
       name: 'injection-tool',
       version: '1.0.0',

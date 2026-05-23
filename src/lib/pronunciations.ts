@@ -13,6 +13,17 @@ export interface PronunciationRule {
 
 const PRONUNCIATIONS_CONFIG_PATH = process.env.INJECTION_PRONUNCIATIONS_CONFIG || './data/pronunciations.json';
 
+type RawPronunciationItem = {
+  id?: unknown;
+  from?: unknown;
+  to?: unknown;
+  enabled?: unknown;
+  priority?: unknown;
+  domainId?: unknown;
+  updatedAt?: unknown;
+  bulkPairs?: unknown;
+};
+
 function sanitizeId(value: string, fallback: string): string {
   const normalized = value
     .trim()
@@ -53,6 +64,62 @@ function getDefaultRules(): PronunciationRule[] {
   ];
 }
 
+function normalizeRuleMeta(item: RawPronunciationItem, fallbackId: string) {
+  return {
+    id: sanitizeId(typeof item.id === 'string' ? item.id : fallbackId, fallbackId),
+    enabled: item.enabled !== false,
+    priority: typeof item.priority === 'number' ? item.priority : 100,
+    domainId: typeof item.domainId === 'string' && item.domainId.trim() ? item.domainId.trim() : undefined,
+    updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+  };
+}
+
+function expandPronunciationItem(item: RawPronunciationItem, index: number): PronunciationRule[] {
+  const fallbackId = `rule_${index + 1}`;
+  const meta = normalizeRuleMeta(item, fallbackId);
+
+  if (Array.isArray(item.bulkPairs) && item.bulkPairs.length > 0) {
+    return item.bulkPairs.reduce<PronunciationRule[]>((rules, pair, pairIndex) => {
+        if (!Array.isArray(pair) || pair.length < 2) {
+          return rules;
+        }
+
+        const [fromRaw, toRaw] = pair;
+        const from = typeof fromRaw === 'string' ? fromRaw.trim() : '';
+        const to = typeof toRaw === 'string' ? toRaw.trim() : '';
+        if (!from || !to) {
+          return rules;
+        }
+
+        const pairIdFallback = `${meta.id}_${pairIndex + 1}`;
+        rules.push({
+          id: sanitizeId(pairIdFallback, pairIdFallback),
+          from,
+          to,
+          enabled: meta.enabled,
+          priority: meta.priority,
+          domainId: meta.domainId,
+          updatedAt: meta.updatedAt,
+        });
+
+        return rules;
+      }, []);
+  }
+
+  const from = typeof item.from === 'string' ? item.from : '';
+  const to = typeof item.to === 'string' ? item.to : '';
+
+  return [{
+    id: meta.id,
+    from,
+    to,
+    enabled: meta.enabled,
+    priority: meta.priority,
+    domainId: meta.domainId,
+    updatedAt: meta.updatedAt,
+  }].filter((rule) => rule.from.trim() && rule.to.trim());
+}
+
 function loadRulesFromFile(): PronunciationRule[] {
   try {
     const filePath = path.resolve(process.cwd(), PRONUNCIATIONS_CONFIG_PATH);
@@ -68,15 +135,7 @@ function loadRulesFromFile(): PronunciationRule[] {
 
     return parsed
       .filter((item) => item && typeof item === 'object')
-      .map((item, index) => ({
-        id: sanitizeId(typeof item.id === 'string' ? item.id : `rule_${index + 1}`, `rule_${index + 1}`),
-        from: typeof item.from === 'string' ? item.from : '',
-        to: typeof item.to === 'string' ? item.to : '',
-        enabled: item.enabled !== false,
-        priority: typeof item.priority === 'number' ? item.priority : 100,
-        domainId: typeof item.domainId === 'string' && item.domainId.trim() ? item.domainId.trim() : undefined,
-        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
-      }))
+      .flatMap((item, index) => expandPronunciationItem(item as RawPronunciationItem, index))
       .filter((item) => item.from.trim() && item.to.trim());
   } catch (err) {
     console.error('Error loading pronunciations:', err);

@@ -15,6 +15,7 @@
     "next": "^14.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "sql.js": "^1.14.1",
     "uuid": "^14.0.0",
     "wanakana": "^5.3.1"
   },
@@ -22,6 +23,7 @@
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "@types/sql.js": "^1.4.11",
     "eslint": "^8.0.0",
     "eslint-config-next": "^14.0.0",
     "typescript": "^5.0.0"

@@ -2,22 +2,39 @@
   "servers": [
     {
       "id": "mcp",
-      "name": "新規MCP",
-      "description": "",
+      "name": "mcp-server (WEB検索)",
+      "description": "ウェブサイトとファイルの検索・取得機能を提供するMCPサーバー",
       "transport": "sse",
       "config": {
         "url": "http://localhost:8000/sse"
       },
       "enabled": true,
-      "timeout": 10000,
-      "mode": "ai",
+      "timeout": 30000,
+      "mode": "hybrid",
       "ruleRouting": {
-        "enabled": false,
+        "enabled": true,
         "rules": [
+          {
+            "id": "search_default",
+            "enabled": true,
+            "priority": 110,
+            "keywords": [
+              "検索",
+              "調べて",
+              "探して",
+              "search",
+              "lookup",
+              "find"
+            ],
+            "toolName": "search_web",
+            "argsTemplate": {
+              "query": "{{query}}"
+            }
+          },
           {
             "id": "calc_default",
             "enabled": true,
-            "priority": 100,
+            "priority": 80,
             "keywords": [
               "計算",
               "calculate",
@@ -32,21 +49,35 @@
           {
             "id": "time_default",
             "enabled": true,
-            "priority": 90,
+            "priority": 100,
             "keywords": [
               "時刻",
               "時間",
               "何時",
-              "time"
+              "current time",
+              "time now"
             ],
             "toolName": "get_current_time"
+          },
+          {
+            "id": "weather_default",
+            "enabled": true,
+            "priority": 90,
+            "keywords": [
+              "天気",
+              "weather"
+            ],
+            "toolName": "get_mock_weather",
+            "argsTemplate": {
+              "city": "{{city}}"
+            }
           }
         ]
       },
       "aiRouting": {
         "enabled": true,
-        "provider": "ollama",
-        "model": "qwen2.5:7b",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
         "systemPrompt": "あなたはMCPツールルーターです。必ずJSONのみで返してください。以下の形式に厳密に従ってください: {\"tool\":\"<toolName|no_tool>\",\"arguments\":{},\"confidence\":0.0,\"reason\":\"...\"}\ntoolは allowedTools に含まれる値か no_tool のみ許可します。\n\nルール:\n- userTextに http:// または https:// で始まるURLが含まれ、「解析」「クロール」「調べて」「サイト」などのキーワードがある場合は tool=crawl_site, arguments={\"url\": \"<そのURL>\"} を返す\n- URLのみが含まれる場合も crawl_site を使用する\n- 「検索」「調べて」などがある場合は search_web を使用する\n- 確信が低い場合は no_tool を選んでください",
         "temperature": 0.7,
         "maxTokens": 2000,
@@ -65,10 +96,199 @@
         "fallbackTool": "crawl_site"
       },
       "createdAt": "2026-05-01T15:34:21.882Z",
-      "updatedAt": "2026-05-15T05:13:17.310Z",
+      "updatedAt": "2026-05-22T02:42:33.363Z",
+      "lastRuntimeSuccess": true,
+      "lastRuntimeAt": "2026-05-22T02:42:33.363Z",
+      "isPreset": true,
+      "lastRuntimeToolName": "search_web"
+    },
+    {
+      "id": "google-workspace",
+      "name": "Google Workspace MCP",
+      "description": "Gmail/Calendar/Drive/Sheets/AppScript tools",
+      "transport": "http",
+      "config": {
+        "url": "http://google-workspace-mcp:8000/mcp"
+      },
+      "enabled": true,
+      "timeout": 300000,
+      "mode": "ai",
+      "ruleRouting": {
+        "enabled": false,
+        "rules": [
+          {
+            "id": "drive_min_test",
+            "enabled": true,
+            "priority": 999,
+            "keywords": [
+              "drive_list_files",
+              "list_drive_items"
+            ],
+            "toolName": "list_drive_items",
+            "argsTemplate": {
+              "user_google_email": "{{user_google_email}}"
+            }
+          }
+        ]
+      },
+      "aiRouting": {
+        "enabled": true,
+        "provider": "ollama",
+        "model": "qwen2.5:7b",
+        "systemPrompt": "あなたは Google Workspace MCP ルーターです。必ず JSON のみを返してください。返却形式: {\"tool\":\"<toolName|no_tool>\",\"arguments\":{},\"confidence\":0.0,\"reason\":\"...\"}。tool は effectiveTools に含まれる実在ツール名か no_tool のみ許可します。\n\n優先ツール:\n- Gmail検索: search_gmail_messages\n- Gmail本文一括取得: get_gmail_messages_content_batch\n- Drive検索: search_drive_files\n- Drive一覧: list_drive_items\n\n意図判定:\n1) メール/Gmail/受信/最新メール/unread/inbox -> search_gmail_messages\n2) 本文/詳細/中身（ID群が文脈にある）-> get_gmail_messages_content_batch\n3) Drive/ドライブ/ファイル検索/資料検索 -> search_drive_files\n4) Drive一覧/フォルダ一覧/内容表示 -> list_drive_items\n5) 該当なしのみ no_tool\n\n引数ルール:\n- user_google_email が必要なツールは必ず渡す。無ければ \"default\"\n- search_gmail_messages: query 必須。未指定時は \"newer_than:7d\"。件数キーは page_size を使う（max_results や maxResults は使わない）。未指定時 page_size=5\n- search_drive_files: query 必須。未指定時は userText から短い検索語を抽出\n- get_gmail_messages_content_batch: message_ids 配列が必要。無い場合は no_tool ではなく reason に不足理由を記載\n\n安全ルール:\n- 推測で本文回答を作らず、まずツール選択を優先\n- 実在しない別名ツールを作らない（例: gmail_list_messages）\n- スキーマ外キーを作らない\n- 意図一致時は no_tool を乱発しない",
+        "temperature": 0.1,
+        "maxTokens": 2000,
+        "confidenceThreshold": 0.6,
+        "allowedTools": [],
+        "fallbackTool": "list_drive_items"
+      },
+      "createdAt": "2026-05-15T00:00:00.000Z",
+      "updatedAt": "2026-05-21T12:42:56.563Z",
       "lastRuntimeSuccess": false,
-      "lastRuntimeAt": "2026-05-15T05:13:17.310Z",
-      "lastRuntimeError": "This operation was aborted"
+      "lastRuntimeAt": "2026-05-21T12:42:56.563Z",
+      "lastRuntimeError": "fetch failed",
+      "isPreset": true
+    },
+    {
+      "id": "dbhub",
+      "name": "DBHub (PostgreSQL MCP)",
+      "description": "DBHub 経由で PostgreSQL に SQL を実行するMCPサーバー。テーブル一覧・データ検索・集計などに使用します。",
+      "transport": "http",
+      "config": {
+        "url": "http://dbhub:8080/mcp"
+      },
+      "enabled": true,
+      "timeout": 30000,
+      "mode": "hybrid",
+      "ruleRouting": {
+        "enabled": true,
+        "rules": [
+          {
+            "id": "db_schema_lookup",
+            "enabled": true,
+            "priority": 200,
+            "keywords": [
+              "テーブル",
+              "table",
+              "カラム",
+              "列",
+              "項目",
+              "構成",
+              "schema",
+              "column",
+              "field"
+            ],
+            "toolName": "search_objects"
+          },
+          {
+            "id": "db_sql_lookup",
+            "enabled": true,
+            "priority": 190,
+            "keywords": [
+              "sql",
+              "select",
+              "where",
+              "join",
+              "count",
+              "集計",
+              "件数"
+            ],
+            "toolName": "execute_sql"
+          }
+        ]
+      },
+      "aiRouting": {
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "systemPrompt": "あなたはDB用MCPツールルーターです。\n必ずJSONのみで返してください。\n以下の形式に厳密に従ってください:\n{\"tool\":\"<toolName|no_tool>\",\"arguments\":{},\"confidence\":0.0,\"reason\":\"...\"}\ntoolは allowedTools に含まれる値か no_tool のみ許可します。\n構造確認・存在確認は search_objects を優先し、件数・一覧・集計・抽出は execute_sql を優先してください。\nユーザーがテーブル名を明示しない場合でも、業務語から最も近いテーブル・カラムを推定してください。\n複数候補がある場合は、最も自然な候補を1つ選び、reason に判断根拠を短く書いてください。\n曖昧でも metadata から候補が見つかる場合は no_tool を避け、適切な候補を選んでください。\n無関係または根拠が足りない場合のみ no_tool を返してください。\n\n対象MCPサーバー名: DBHub (PostgreSQL MCP)\nサーバー概要: DBHub 経由で PostgreSQL に SQL を実行するMCPサーバー。テーブル一覧・データ検索・集計などに使用します。\n利用可能ツール: execute_sql, search_objects\nsearch_objects を使えるため、テーブル名・カラム名・構造確認はまずこれで確認してください。\nexecute_sql を使えるため、件数・一覧・集計・絞り込みは SQL で取得してください。\n\n以下のDBメタ情報を優先して参照し、自然言語から最も近いテーブルとカラムを選んでください。\nDB metadata exploration result:\ntables: properties\ntable properties: columns=id, title, city, ward, rent, rooms, size, built_year, pet_ok, station, walk_minutes, description, updated_at",
+        "temperature": 0.1,
+        "maxTokens": 2000,
+        "confidenceThreshold": 0.6,
+        "allowedTools": [
+          "execute_sql",
+          "search_objects"
+        ],
+        "fallbackTool": "execute_sql"
+      },
+      "createdAt": "2026-05-19T00:00:00.000Z",
+      "updatedAt": "2026-05-22T08:09:58.813Z",
+      "lastRuntimeSuccess": true,
+      "lastRuntimeAt": "2026-05-22T08:09:58.813Z",
+      "lastRuntimeToolName": "execute_sql",
+      "isPreset": true
+    },
+    {
+      "id": "estat",
+      "name": "e-Stat MCP",
+      "description": "政府統計の総合窓口(e-Stat)の統計検索・メタデータ取得・統計データ取得を行うMCPサーバーです。",
+      "transport": "sse",
+      "config": {
+        "url": "http://estat-mcp:8000/sse"
+      },
+      "enabled": true,
+      "timeout": 60000,
+      "mode": "hybrid",
+      "ruleRouting": {
+        "enabled": true,
+        "rules": [
+          {
+            "id": "estat_search_statistics",
+            "enabled": true,
+            "priority": 200,
+            "keywords": [
+              "統計",
+              "人口",
+              "GDP",
+              "CPI",
+              "物価",
+              "失業率",
+              "雇用",
+              "国勢調査",
+              "e-stat",
+              "estat"
+            ],
+            "toolName": "search_statistics"
+          },
+          {
+            "id": "estat_get_data",
+            "enabled": true,
+            "priority": 190,
+            "keywords": [
+              "推移",
+              "時系列",
+              "データ",
+              "値",
+              "件数",
+              "割合",
+              "比較"
+            ],
+            "toolName": "get_statistic_data"
+          }
+        ]
+      },
+      "aiRouting": {
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "systemPrompt": "あなたは e-Stat MCP ルーターです。必ず JSON のみで返してください。返却形式: {\"tool\":\"<toolName|no_tool>\",\"arguments\":{},\"confidence\":0.0,\"reason\":\"...\"}。tool は effectiveTools に含まれるツール名か no_tool のみ許可します。統計表を探す段階では search_statistics、表の構造確認は get_statistic_meta、値の取得は get_statistic_data、全件に近い取得は get_all_statistic_data を優先してください。stats_id が未確定なのに直接 data 系を選ばず、まず search_statistics か get_statistic_meta で絞り込んでください。",
+        "temperature": 0.1,
+        "maxTokens": 2000,
+        "confidenceThreshold": 0.6,
+        "allowedTools": [
+          "search_statistics",
+          "get_statistic_meta",
+          "get_statistic_data",
+          "get_all_statistic_data"
+        ],
+        "fallbackTool": "search_statistics"
+      },
+      "createdAt": "2026-05-21T00:00:00.000Z",
+      "updatedAt": "2026-05-21T23:20:18.783Z",
+      "isPreset": true,
+      "lastRuntimeSuccess": true,
+      "lastRuntimeAt": "2026-05-21T23:20:18.783Z",
+      "lastRuntimeToolName": "search_statistics"
     }
   ]
 }

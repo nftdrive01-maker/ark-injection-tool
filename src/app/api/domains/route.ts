@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, extractToken } from '@/lib/auth';
 import { createDomain, getAllDomains } from '@/lib/domains';
+import { prepareDomainAccessUsersForSave } from '@/lib/domain-access-auth';
 
 export async function GET(req: NextRequest) {
   try {
@@ -42,9 +43,13 @@ export async function POST(req: NextRequest) {
     const created = createDomain({
       name: body.name.trim(),
       description: body.description,
+      sharedLogEnabled: body.sharedLogEnabled,
+      accessControlEnabled: body.accessControlEnabled,
+      accessUsers: prepareDomainAccessUsersForSave(body.accessUsers, []),
       baseSystemPrompt: body.baseSystemPrompt,
       baseContext: body.baseContext,
       bgUrl: body.bgUrl,
+      themeColor: body.themeColor,
       characterName: body.characterName,
       vrmEnabled: body.vrmEnabled,
       vrmUrl: body.vrmUrl,

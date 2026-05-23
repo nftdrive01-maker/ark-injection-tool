@@ -6,6 +6,9 @@
 
 import fs from 'fs';
 import path from 'path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { getAllDomains } from './domains';
 
 export type MCPRoutingMode = 'rule' | 'ai' | 'hybrid';
@@ -40,6 +43,7 @@ export interface MCPServer {
   id: string;
   name: string;
   description: string;
+  isPreset?: boolean;
   transport: 'stdio' | 'sse' | 'http';
   // stdio: { command: string; args: string[] }
   // sse: { url: string }
@@ -73,6 +77,89 @@ interface MCPServerStore {
 
 const MCP_SERVERS_CONFIG_PATH = process.env.INJECTION_MCP_SERVERS_CONFIG || './data/mcp-servers.json';
 const DEFAULT_MCP_TIMEOUT = parseInt(process.env.INJECTION_DEFAULT_MCP_TIMEOUT || '30000', 10);
+const DEFAULT_PRESET_MCP_SERVER_IDS = ['dbhub', 'google-workspace', 'estat', 'mcp'] as const;
+
+const DEFAULT_PRESET_MCP_SERVER_ORDER = new Map<string, number>(
+  DEFAULT_PRESET_MCP_SERVER_IDS.map((id, index) => [id, index])
+);
+
+export function isProtectedMCPServerId(id: string): boolean {
+  return DEFAULT_PRESET_MCP_SERVER_IDS.includes(id as (typeof DEFAULT_PRESET_MCP_SERVER_IDS)[number]);
+}
+
+function sortMCPServers(servers: MCPServer[]): MCPServer[] {
+  return [...servers].sort((left, right) => {
+    const leftOrder = DEFAULT_PRESET_MCP_SERVER_ORDER.get(left.id);
+    const rightOrder = DEFAULT_PRESET_MCP_SERVER_ORDER.get(right.id);
+
+    if (typeof leftOrder === 'number' && typeof rightOrder === 'number') {
+      return leftOrder - rightOrder;
+    }
+
+    if (typeof leftOrder === 'number') {
+      return -1;
+    }
+
+    if (typeof rightOrder === 'number') {
+      return 1;
+    }
+
+    return left.name.localeCompare(right.name, 'ja');
+  });
+}
+
+function buildHealthProbeUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.pathname = '/health';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+function buildHealthProbeCandidates(serverId: string, rawUrl: string): string[] {
+  const candidates: string[] = [];
+  const push = (url: string) => {
+    if (url && !candidates.includes(url)) {
+      candidates.push(url);
+    }
+  };
+
+  const primary = buildHealthProbeUrl(rawUrl);
+  push(primary);
+
+  try {
+    const parsed = new URL(rawUrl);
+
+    // Docker composeのcontainer_name表記(ark-...)が名前解決できない環境向け。
+    if (parsed.hostname.startsWith('ark-')) {
+      const alt = new URL(rawUrl);
+      alt.hostname = parsed.hostname.replace(/^ark-/, '');
+      push(buildHealthProbeUrl(alt.toString()));
+    }
+
+    // ローカルで next dev を動かしている場合のフォールバック。
+    if (serverId === 'google-workspace') {
+      const publicPort = process.env.GOOGLE_WORKSPACE_MCP_PORT || '8001';
+      const localhost = new URL(rawUrl);
+      localhost.hostname = 'localhost';
+      localhost.port = publicPort;
+      push(buildHealthProbeUrl(localhost.toString()));
+
+      const hostDockerInternal = new URL(rawUrl);
+      hostDockerInternal.hostname = 'host.docker.internal';
+      hostDockerInternal.port = publicPort;
+      push(buildHealthProbeUrl(hostDockerInternal.toString()));
+    }
+  } catch {
+    // URL解析不可時は primary のみ使用
+  }
+
+  return candidates;
+}
 
 const DEFAULT_AI_ROUTING_PROMPT = [
   'あなたはMCPツールルーターです。',
@@ -82,6 +169,225 @@ const DEFAULT_AI_ROUTING_PROMPT = [
   'toolは allowedTools に含まれる値か no_tool のみ許可します。',
   '確信が低い場合は no_tool を選んでください。',
 ].join('\n');
+
+const DEFAULT_DB_ROUTING_PROMPT_LINES = [
+  'あなたはDB用MCPツールルーターです。',
+  '必ずJSONのみで返してください。',
+  '以下の形式に厳密に従ってください:',
+  '{"tool":"<toolName|no_tool>","arguments":{},"confidence":0.0,"reason":"..."}',
+  'toolは allowedTools に含まれる値か no_tool のみ許可します。',
+  '構造確認・存在確認は search_objects を優先し、件数・一覧・集計・抽出は execute_sql を優先してください。',
+  'ユーザーがテーブル名を明示しない場合でも、業務語から最も近いテーブル・カラムを推定してください。',
+  '複数候補がある場合は、最も自然な候補を1つ選び、reason に判断根拠を短く書いてください。',
+  '曖昧でも metadata から候補が見つかる場合は no_tool を避け、適切な候補を選んでください。',
+  '無関係または根拠が足りない場合のみ no_tool を返してください。',
+].join('\n');
+
+function resolveRuntimeUrl(url: string): string {
+  const internalBase = process.env.INJECTION_MCP_INTERNAL_BASE_URL;
+  if (internalBase) {
+    return url.replace(/^https?:\/\/localhost(:\d+)?/, internalBase);
+  }
+  return url;
+}
+
+async function createClientTransport(server: MCPServer) {
+  if (server.transport === 'sse') {
+    if (!server.config.url) {
+      throw new Error('SSE URLが未設定です');
+    }
+    return new SSEClientTransport(new URL(resolveRuntimeUrl(server.config.url)));
+  }
+
+  if (server.transport === 'http') {
+    if (!server.config.url) {
+      throw new Error('HTTP URLが未設定です');
+    }
+    return new StreamableHTTPClientTransport(new URL(resolveRuntimeUrl(server.config.url)));
+  }
+
+  throw new Error('stdioのSystem Prompt自動生成は未対応です');
+}
+
+function extractTextContent(callResult: unknown): string {
+  const resultObj = callResult as {
+    content?: Array<{ type?: string; text?: string }>;
+    structuredContent?: unknown;
+  };
+
+  if (Array.isArray(resultObj?.content) && resultObj.content.length > 0) {
+    const texts = resultObj.content
+      .map((item) => (item?.type === 'text' || item?.text ? item.text : ''))
+      .filter((text): text is string => typeof text === 'string' && text.trim().length > 0);
+
+    if (texts.length > 0) {
+      return texts.join('\n');
+    }
+  }
+
+  if (typeof resultObj?.structuredContent !== 'undefined') {
+    try {
+      return JSON.stringify(resultObj.structuredContent, null, 2);
+    } catch {
+      return String(resultObj.structuredContent);
+    }
+  }
+
+  return '';
+}
+
+function parseDbHubSearchOutput(output: string): any {
+  try {
+    return JSON.parse(output);
+  } catch {
+    const match = output.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function buildDbHubExplorationSummary(tableOutput: string, columnOutput: string): string {
+  const tablePayload = parseDbHubSearchOutput(tableOutput);
+  const columnPayload = parseDbHubSearchOutput(columnOutput);
+
+  const tableNames = Array.isArray(tablePayload?.data?.results)
+    ? tablePayload.data.results
+        .map((item: { name?: string }) => (typeof item.name === 'string' ? item.name.trim() : ''))
+        .filter((name: string) => name.length > 0)
+    : [];
+
+  const columnsByTable = new Map<string, string[]>();
+  if (Array.isArray(columnPayload?.data?.results)) {
+    for (const item of columnPayload.data.results as Array<{ table?: string; name?: string }>) {
+      const table = typeof item.table === 'string' ? item.table.trim() : '';
+      const column = typeof item.name === 'string' ? item.name.trim() : '';
+      if (!table || !column) {
+        continue;
+      }
+      const existing = columnsByTable.get(table) || [];
+      if (!existing.includes(column)) {
+        existing.push(column);
+      }
+      columnsByTable.set(table, existing);
+    }
+  }
+
+  const lines: string[] = [];
+  lines.push('DB metadata exploration result:');
+  lines.push(`tables: ${tableNames.join(', ') || 'none'}`);
+  for (const tableName of tableNames.slice(0, 20)) {
+    const columns = columnsByTable.get(tableName) || [];
+    lines.push(`table ${tableName}: columns=${columns.join(', ') || 'none'}`);
+  }
+
+  if (tableNames.length === 0 && columnsByTable.size === 0) {
+    lines.push('No metadata found.');
+  }
+
+  return lines.join('\n');
+}
+
+function toToolNameList(listToolsResult: unknown): string[] {
+  const resultObj = listToolsResult as { tools?: Array<{ name?: string }> };
+  return Array.isArray(resultObj?.tools)
+    ? resultObj.tools
+        .map((tool) => (typeof tool?.name === 'string' ? tool.name.trim() : ''))
+        .filter((name) => name.length > 0)
+    : [];
+}
+
+function createGeneratedSystemPrompt(server: MCPServer, availableTools: string[], explorationSummary?: string): string {
+  const lines: string[] = [];
+  const isDbLike = availableTools.includes('search_objects') || availableTools.includes('execute_sql');
+
+  lines.push(isDbLike ? DEFAULT_DB_ROUTING_PROMPT_LINES : DEFAULT_AI_ROUTING_PROMPT);
+  lines.push('');
+  lines.push(`対象MCPサーバー名: ${server.name}`);
+  if (server.description.trim()) {
+    lines.push(`サーバー概要: ${server.description.trim()}`);
+  }
+  lines.push(`利用可能ツール: ${availableTools.join(', ') || 'none'}`);
+
+  if (availableTools.includes('search_objects')) {
+    lines.push('search_objects を使えるため、テーブル名・カラム名・構造確認はまずこれで確認してください。');
+  }
+
+  if (availableTools.includes('execute_sql')) {
+    lines.push('execute_sql を使えるため、件数・一覧・集計・絞り込みは SQL で取得してください。');
+  }
+
+  if (explorationSummary) {
+    lines.push('');
+    lines.push('以下のDBメタ情報を優先して参照し、自然言語から最も近いテーブルとカラムを選んでください。');
+    lines.push(explorationSummary);
+  }
+
+  return lines.join('\n');
+}
+
+export async function generateMCPServerSystemPrompt(id: string): Promise<{
+  systemPrompt: string;
+  availableTools: string[];
+  explorationSummary?: string;
+}> {
+  const server = getMCPServerById(id);
+
+  if (!server) {
+    throw new Error('MCPサーバーが見つかりません');
+  }
+
+  if (server.transport === 'stdio') {
+    return {
+      systemPrompt: createGeneratedSystemPrompt(server, [], undefined),
+      availableTools: [],
+    };
+  }
+
+  const transport = await createClientTransport(server);
+  const client = new Client({
+    name: 'injection-tool-admin',
+    version: '1.0.0',
+  });
+
+  try {
+    await client.connect(transport);
+
+    const listToolsResult = await client.listTools();
+    const availableTools = toToolNameList(listToolsResult);
+
+    let explorationSummary: string | undefined;
+    if (availableTools.includes('search_objects')) {
+      const tableMetadataResult = await client.callTool({
+        name: 'search_objects',
+        arguments: { query: '', object_type: 'table', source: 'default' },
+      });
+      const columnMetadataResult = await client.callTool({
+        name: 'search_objects',
+        arguments: { query: '', object_type: 'column', source: 'default' },
+      });
+
+      explorationSummary = buildDbHubExplorationSummary(
+        extractTextContent(tableMetadataResult),
+        extractTextContent(columnMetadataResult),
+      );
+    }
+
+    return {
+      systemPrompt: createGeneratedSystemPrompt(server, availableTools, explorationSummary),
+      availableTools,
+      explorationSummary,
+    };
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
 
 function sanitizeId(value: string, fallback: string): string {
   const normalized = value
@@ -247,6 +553,7 @@ function normalizeMCPServer(server: MCPServer): MCPServer {
 
   return {
     ...server,
+    isPreset: isProtectedMCPServerId(server.id),
     timeout: typeof server.timeout === 'number' && Number.isFinite(server.timeout) && server.timeout > 0
       ? server.timeout
       : DEFAULT_MCP_TIMEOUT,
@@ -339,11 +646,6 @@ export function validateMCPServerForSave(
           errors.push('aiRouting.allowedTools contains duplicates');
         }
 
-        const aiEnabled = aiObj.enabled === true;
-        if ((mode === 'ai' || aiEnabled) && allowedTools.length === 0) {
-          errors.push('aiRouting.allowedTools must have at least one item when mode=ai or aiRouting.enabled=true');
-        }
-
         if (typeof aiObj.fallbackTool === 'string' && aiObj.fallbackTool.trim()) {
           if (!allowedTools.includes(aiObj.fallbackTool.trim())) {
             errors.push('aiRouting.fallbackTool must be included in aiRouting.allowedTools');
@@ -410,7 +712,7 @@ function writeStoreToFile(store: MCPServerStore): void {
  */
 export function getAllMCPServers(): MCPServer[] {
   const store = loadStoreFromFile();
-  return store.servers;
+  return sortMCPServers(store.servers);
 }
 
 /**
@@ -544,6 +846,10 @@ export function setMCPServerRuntimeStatus(
  * - ドメインで参照中のサーバーは削除不可
  */
 export function deleteMCPServer(id: string): boolean {
+  if (isProtectedMCPServerId(id)) {
+    return false;
+  }
+
   const store = loadStoreFromFile();
   const index = store.servers.findIndex((server) => server.id === id);
 
@@ -589,24 +895,39 @@ export async function testMCPServerConnection(id: string): Promise<{
     const startTime = Date.now();
 
     if (server.transport === 'http' && server.config.url) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), server.timeout);
+      const probes = buildHealthProbeCandidates(server.id, server.config.url);
+      let lastError = '';
 
-      let response: Response;
-      try {
-        response = await fetch(server.config.url, {
-          method: 'GET',
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timeout);
+      for (const probeUrl of probes) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), server.timeout);
+
+        try {
+          const response = await fetch(probeUrl, {
+            method: 'GET',
+            signal: controller.signal,
+          });
+
+          const latency = Date.now() - startTime;
+          if (response.ok) {
+            return {
+              success: true,
+              message: `HTTPサーバーに接続できました (${probeUrl})`,
+              latency,
+            };
+          }
+
+          lastError = `HTTP ${response.status} (${probeUrl})`;
+        } catch (err) {
+          lastError = err instanceof Error ? `${err.message} (${probeUrl})` : `接続失敗 (${probeUrl})`;
+        } finally {
+          clearTimeout(timeout);
+        }
       }
 
-      const latency = Date.now() - startTime;
       return {
-        success: response.ok,
-        message: response.ok ? 'サーバーに接続できました' : `HTTP ${response.status}`,
-        latency,
+        success: false,
+        message: lastError || 'HTTP接続テストに失敗しました',
       };
     }
 

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toKana } from 'wanakana';
@@ -8,9 +8,13 @@ interface Domain {
   name: string;
   description: string;
   enabled?: boolean;
+  sharedLogEnabled?: boolean;
+  accessControlEnabled?: boolean;
+  accessUsers?: DomainAccessUser[];
   baseSystemPrompt: string;
   baseContext: string;
   bgUrl?: string;
+  themeColor?: string;
   characterName?: string;
   vrmEnabled?: boolean;
   vrmUrl?: string;
@@ -34,6 +38,14 @@ interface Domain {
   context: string;
   version: string;
   ttl: number;
+}
+
+interface DomainAccessUser {
+  id: string;
+  username: string;
+  passwordHash?: string;
+  password?: string;
+  updatedAt?: string;
 }
 
 interface Chronicle {
@@ -117,6 +129,33 @@ interface SessionStatus {
   available: boolean;
 }
 
+interface SharedLogEntry {
+  historyId: string;
+  domainId: string;
+  userId?: string;
+  role: 'assistant' | 'system' | 'user';
+  content: string;
+  createdAt: number;
+  createdAtDayKey: string;
+  sessionId?: string;
+  dbResult?: {
+    title?: string;
+    sourceName?: string;
+    toolName?: string;
+    summary?: string;
+    queryText?: string;
+    sortLabel?: string;
+    totalCount?: number;
+    previewColumns?: string[];
+    previewRows?: Array<Record<string, string | number | boolean | null>>;
+  };
+  mcpInfo?: {
+    used?: boolean;
+    serverId?: string;
+    toolName?: string;
+  };
+}
+
 interface PublicManagementSettings {
   maxConcurrentSessions: number;
 }
@@ -125,6 +164,7 @@ interface MCPServer {
   id: string;
   name: string;
   description: string;
+  isPreset?: boolean;
   transport: 'stdio' | 'sse' | 'http';
   mode?: 'rule' | 'ai' | 'hybrid';
   config: {
@@ -176,6 +216,9 @@ const DEFAULT_GAZE_GREETINGS = [
 const DANGER_LINE_PERCENT = 90;
 const WARNING_LINE_PERCENT = 75;
 const SELECTED_DOMAIN_STORAGE_KEY = 'arki_selected_domain_id';
+const SHARED_LOG_ALL_DOMAINS = '__all__';
+const SHARED_LOG_ALL_USERS = '__all__';
+const SHARED_LOG_ALL_SESSIONS = '__all__';
 const LATIN_WORD_PATTERN = /https?:\/\/\S+|www\.\S+|[A-Za-z][A-Za-z'-]*/g;
 
 interface DomainPromptTemplate {
@@ -255,6 +298,31 @@ function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(cjkCount * 1.2 + nonCjkCount / 4));
 }
 
+function formatAdminTimestamp(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '-';
+  }
+
+  return new Date(value).toLocaleString('ja-JP');
+}
+
+function normalizeAdminDomain(domain: Domain): Domain {
+  return {
+    ...domain,
+    themeColor: typeof domain.themeColor === 'string' ? domain.themeColor : '',
+    accessControlEnabled: domain.accessControlEnabled === true,
+    accessUsers: Array.isArray(domain.accessUsers)
+      ? domain.accessUsers.map((user) => ({
+          id: user.id,
+          username: user.username,
+          passwordHash: user.passwordHash,
+          password: '',
+          updatedAt: user.updatedAt,
+        }))
+      : [],
+  };
+}
+
 export default function AdminPage() {
   const showDomainSiteAnalysis = false;
 
@@ -264,7 +332,7 @@ export default function AdminPage() {
   const [pronunciationSettings, setPronunciationSettings] = useState<PronunciationSettings>({
     wanaKanaEnabled: false,
   });
-  const [activeTab, setActiveTab] = useState<'domain' | 'knowledge' | 'chronicle' | 'asset' | 'pronunciation' | 'public' | 'mcp'>('domain');
+  const [activeTab, setActiveTab] = useState<'domain' | 'shared-log' | 'knowledge' | 'chronicle' | 'asset' | 'pronunciation' | 'public' | 'mcp'>('domain');
   const [selectedDomain, setSelectedDomain] = useState<Domain | null>(null);
   const [selectedKnowledge, setSelectedKnowledge] = useState<Knowledge | null>(null);
   const [chronicles, setChronicles] = useState<Chronicle[]>([]);
@@ -280,6 +348,17 @@ export default function AdminPage() {
   const [savingPronunciationSettings, setSavingPronunciationSettings] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [sharedLogs, setSharedLogs] = useState<SharedLogEntry[]>([]);
+  const [sharedLogsLoading, setSharedLogsLoading] = useState(false);
+  const [sharedLogsError, setSharedLogsError] = useState('');
+  const [sharedLogsTotal, setSharedLogsTotal] = useState(0);
+  const [sharedLogsLimit, setSharedLogsLimit] = useState(50);
+  const [sharedLogFilterDomainId, setSharedLogFilterDomainId] = useState('');
+  const [sharedLogFilterUserId, setSharedLogFilterUserId] = useState(SHARED_LOG_ALL_USERS);
+  const [sharedLogAvailableUserIds, setSharedLogAvailableUserIds] = useState<string[]>([]);
+  const [sharedLogFilterSessionId, setSharedLogFilterSessionId] = useState(SHARED_LOG_ALL_SESSIONS);
+  const [sharedLogAvailableSessionIds, setSharedLogAvailableSessionIds] = useState<string[]>([]);
+  const [expandedSharedLogId, setExpandedSharedLogId] = useState<string | null>(null);
   const [runtimeModelInfo, setRuntimeModelInfo] = useState<RuntimeModelInfo | null>(null);
   const [runtimeInfoError, setRuntimeInfoError] = useState('');
   const [runtimeInfoLoading, setRuntimeInfoLoading] = useState(false);
@@ -307,6 +386,7 @@ export default function AdminPage() {
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
   const [selectedMcpServer, setSelectedMcpServer] = useState<MCPServer | null>(null);
   const [savingMcpServer, setSavingMcpServer] = useState(false);
+  const [generatingMcpSystemPrompt, setGeneratingMcpSystemPrompt] = useState(false);
   const [mcpServersError, setMcpServersError] = useState('');
   const [mcpTestBusy, setMcpTestBusy] = useState<string | null>(null);
   const [mcpTestResults, setMcpTestResults] = useState<Record<string, { success: boolean; message: string; latency?: number }>>({});
@@ -353,14 +433,10 @@ export default function AdminPage() {
       .filter((item) => item.length > 0);
   };
 
-  const validateAllowedTools = (tools: string[], aiEnabled: boolean): string => {
+  const validateAllowedTools = (tools: string[], _aiEnabled: boolean): string => {
     const uniqueCount = new Set(tools).size;
     if (uniqueCount !== tools.length) {
       return 'Allowed Toolsに重複があります';
-    }
-
-    if (aiEnabled && tools.length === 0) {
-      return 'AI Routing有効時はAllowed Toolsを1つ以上設定してください';
     }
 
     return '';
@@ -473,6 +549,39 @@ export default function AdminPage() {
     };
   }, [composedDomainText, runtimeModelInfo, manualContextLimitInput]);
 
+  const sharedLogEnabledDomains = useMemo(
+    () => domains.filter((domain) => domain.sharedLogEnabled === true),
+    [domains],
+  );
+
+  const effectiveSharedLogDomainId = useMemo(() => {
+    if (sharedLogFilterDomainId === SHARED_LOG_ALL_DOMAINS) {
+      return '';
+    }
+
+    if (sharedLogFilterDomainId) {
+      return sharedLogFilterDomainId;
+    }
+
+    return selectedDomain?.sharedLogEnabled ? selectedDomain.id : '';
+  }, [sharedLogFilterDomainId, selectedDomain?.id, selectedDomain?.sharedLogEnabled]);
+
+  const effectiveSharedLogUserId = useMemo(() => {
+    if (!sharedLogFilterUserId || sharedLogFilterUserId === SHARED_LOG_ALL_USERS) {
+      return '';
+    }
+
+    return sharedLogFilterUserId;
+  }, [sharedLogFilterUserId]);
+
+  const effectiveSharedLogSessionId = useMemo(() => {
+    if (!sharedLogFilterSessionId || sharedLogFilterSessionId === SHARED_LOG_ALL_SESSIONS) {
+      return '';
+    }
+
+    return sharedLogFilterSessionId;
+  }, [sharedLogFilterSessionId]);
+
   const loadAllData = async (token: string) => {
     const [domainsRes, knowledgesRes, chroniclesRes, pronunciationsRes, pronunciationSettingsRes, memoriesRes] = await Promise.all([
       fetch('/api/domains', {
@@ -496,7 +605,7 @@ export default function AdminPage() {
     ]);
 
     if (domainsRes.ok) {
-      const domainData = await domainsRes.json();
+      const domainData = (await domainsRes.json()).map((domain: Domain) => normalizeAdminDomain(domain));
       setDomains(domainData);
       if (domainData.length > 0) {
         const storedDomainId = typeof window !== 'undefined'
@@ -643,6 +752,64 @@ export default function AdminPage() {
       setRuntimeInfoError('モデル情報の取得中にエラーが発生しました');
     } finally {
       setRuntimeInfoLoading(false);
+    }
+  };
+
+  const loadDomainSharedLogs = async (token: string, options?: { domainId?: string; userId?: string; sessionId?: string; limit?: number }) => {
+    try {
+      setSharedLogsLoading(true);
+      setSharedLogsError('');
+
+      const params = new URLSearchParams();
+      if (options?.domainId) {
+        params.set('domainId', options.domainId);
+      }
+      if (options?.userId) {
+        params.set('userId', options.userId);
+      }
+      if (options?.sessionId) {
+        params.set('sessionId', options.sessionId);
+      }
+      params.set('limit', String(options?.limit || sharedLogsLimit));
+
+      const response = await fetch(`/api/domain-chat-history?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: 'no-store',
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setSharedLogs([]);
+        setSharedLogsTotal(0);
+        setSharedLogsError(payload?.error || 'チャット履歴の取得に失敗しました');
+        return;
+      }
+
+      setSharedLogs(Array.isArray(payload?.items) ? payload.items : []);
+      setSharedLogsTotal(typeof payload?.totalCount === 'number' ? payload.totalCount : 0);
+      setSharedLogAvailableUserIds(
+        Array.isArray(payload?.availableUserIds)
+          ? payload.availableUserIds.filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
+          : [],
+      );
+      setSharedLogAvailableSessionIds(
+        Array.isArray(payload?.availableSessionIds)
+          ? payload.availableSessionIds.filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
+          : [],
+      );
+      setExpandedSharedLogId(null);
+    } catch (err) {
+      console.error('Failed to load shared logs:', err);
+      setSharedLogs([]);
+      setSharedLogsTotal(0);
+      setSharedLogAvailableUserIds([]);
+      setSharedLogAvailableSessionIds([]);
+      setSharedLogsError('チャット履歴の取得中にエラーが発生しました');
+    } finally {
+      setSharedLogsLoading(false);
     }
   };
 
@@ -959,7 +1126,51 @@ export default function AdminPage() {
     }
   };
 
+  const handleGenerateMcpSystemPrompt = async () => {
+    if (!selectedMcpServer) {
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    try {
+      setGeneratingMcpSystemPrompt(true);
+
+      const response = await fetch(`/api/mcp-servers/${selectedMcpServer.id}/generate-system-prompt`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setMessage(payload?.error || 'System Promptの自動生成に失敗しました');
+        return;
+      }
+
+      setSelectedMcpServer(payload.server);
+      setMcpServers((prev) => prev.map((server) => (server.id === payload.server.id ? payload.server : server)));
+      setMessage('DB情報からSystem Promptを自動生成して保存しました');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'System Prompt生成中にエラーが発生しました';
+      setMessage(message);
+    } finally {
+      setGeneratingMcpSystemPrompt(false);
+    }
+  };
+
   const handleDeleteMcpServer = async (serverId: string) => {
+    const target = mcpServers.find((server) => server.id === serverId);
+    if (target?.isPreset) {
+      setMessage('デフォルトプリセットのMCPサーバーは削除できません');
+      return;
+    }
+
     const token = localStorage.getItem('injection_token');
     if (!token) {
       setMessage('認証情報が見つかりません。再ログインしてください');
@@ -984,9 +1195,10 @@ export default function AdminPage() {
         return;
       }
 
-      setMcpServers((prev) => prev.filter((s) => s.id !== serverId));
+      const nextServers = mcpServers.filter((s) => s.id !== serverId);
+      setMcpServers(nextServers);
       if (selectedMcpServer?.id === serverId) {
-        setSelectedMcpServer(mcpServers[0] || null);
+        setSelectedMcpServer(nextServers[0] || null);
       }
       setMessage('MCPサーバーを削除しました');
     } catch (err) {
@@ -1446,6 +1658,53 @@ export default function AdminPage() {
     };
   }, [activeTab]);
 
+  useEffect(() => {
+    const token = localStorage.getItem('injection_token');
+    if (!token || activeTab !== 'shared-log') {
+      return;
+    }
+
+    loadDomainSharedLogs(token, {
+      domainId: effectiveSharedLogDomainId || undefined,
+      userId: effectiveSharedLogUserId || undefined,
+      sessionId: effectiveSharedLogSessionId || undefined,
+      limit: sharedLogsLimit,
+    });
+  }, [activeTab, effectiveSharedLogDomainId, effectiveSharedLogUserId, effectiveSharedLogSessionId, sharedLogsLimit]);
+
+  useEffect(() => {
+    if (sharedLogFilterDomainId === SHARED_LOG_ALL_DOMAINS || !sharedLogFilterDomainId) {
+      return;
+    }
+
+    const exists = sharedLogEnabledDomains.some((domain) => domain.id === sharedLogFilterDomainId);
+    if (!exists) {
+      setSharedLogFilterDomainId('');
+    }
+  }, [sharedLogFilterDomainId, sharedLogEnabledDomains]);
+
+  useEffect(() => {
+    if (sharedLogFilterUserId === SHARED_LOG_ALL_USERS) {
+      return;
+    }
+
+    const exists = sharedLogAvailableUserIds.includes(sharedLogFilterUserId);
+    if (!exists) {
+      setSharedLogFilterUserId(SHARED_LOG_ALL_USERS);
+    }
+  }, [sharedLogAvailableUserIds, sharedLogFilterUserId]);
+
+  useEffect(() => {
+    if (sharedLogFilterSessionId === SHARED_LOG_ALL_SESSIONS) {
+      return;
+    }
+
+    const exists = sharedLogAvailableSessionIds.includes(sharedLogFilterSessionId);
+    if (!exists) {
+      setSharedLogFilterSessionId(SHARED_LOG_ALL_SESSIONS);
+    }
+  }, [sharedLogAvailableSessionIds, sharedLogFilterSessionId]);
+
   const handleTestPlaySbv2 = async () => {
     if (!selectedDomain) {
       return;
@@ -1719,6 +1978,26 @@ export default function AdminPage() {
     setMessage('');
 
     try {
+      const accessUsers = Array.isArray(selectedDomain.accessUsers) ? selectedDomain.accessUsers : [];
+      const invalidAccessUser = accessUsers.find((user) => {
+        const username = (user.username || '').trim();
+        const hasStoredPassword = Boolean(user.passwordHash && user.passwordHash.trim().length > 0);
+        const hasNewPassword = Boolean(user.password && user.password.trim().length > 0);
+        return !username || (!hasStoredPassword && !hasNewPassword);
+      });
+
+      if ((selectedDomain.accessControlEnabled ?? false) && accessUsers.length === 0) {
+        setMessage('アクセス制限を有効にする場合は、少なくとも1件のユーザーを登録してください');
+        setSaving(false);
+        return;
+      }
+
+      if (invalidAccessUser) {
+        setMessage('アクセスユーザーはユーザー名必須です。新規追加時はパスワードも入力してください');
+        setSaving(false);
+        return;
+      }
+
       const token = localStorage.getItem('injection_token');
       const res = await fetch(`/api/domains/${selectedDomain.id}`, {
         method: 'PUT',
@@ -1730,7 +2009,7 @@ export default function AdminPage() {
       });
 
       if (res.ok) {
-        const updatedDomain = await res.json();
+        const updatedDomain = normalizeAdminDomain(await res.json());
         setDomains((prev) => prev.map((domain) => (domain.id === updatedDomain.id ? updatedDomain : domain)));
         setSelectedDomain(updatedDomain);
         setMessage('保存しました');
@@ -1764,7 +2043,7 @@ export default function AdminPage() {
       });
 
       if (res.ok) {
-        const created = await res.json();
+        const created = normalizeAdminDomain(await res.json());
         setDomains((prev) => [...prev, created]);
         setSelectedDomain(created);
         setMessage('ドメインを追加しました');
@@ -2389,11 +2668,7 @@ export default function AdminPage() {
     }
   };
 
-  const isMcpSaveBlockedByAiAllowedTools = Boolean(
-    selectedMcpServer &&
-    selectedMcpServer.mode === 'ai' &&
-    (selectedMcpServer.aiRouting?.allowedTools || []).length === 0
-  );
+  const isMcpSaveBlockedByAiAllowedTools = false;
 
   if (loading) {
     return <div style={{ padding: '20px' }}>読み込み中...</div>;
@@ -2515,6 +2790,22 @@ export default function AdminPage() {
               }}
             >
               公開管理
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('shared-log')}
+              style={{
+                padding: '8px 14px',
+                backgroundColor: activeTab === 'shared-log' ? '#0066cc' : '#f0f0f0',
+                color: activeTab === 'shared-log' ? 'white' : '#000',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: activeTab === 'shared-log' ? 'bold' : 'normal',
+              }}
+            >
+              共有ログ
             </button>
 
             <button
@@ -2683,6 +2974,161 @@ export default function AdminPage() {
                   </label>
                   <div style={{ marginTop: '4px', fontSize: '12px', color: '#666' }}>
                     OFFにするとドメインデータは保持したまま、クライアントの選択候補から除外されます。
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '15px' }}>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedDomain.sharedLogEnabled ?? false}
+                      onChange={(e) =>
+                        setSelectedDomain({ ...selectedDomain, sharedLogEnabled: e.target.checked })
+                      }
+                    />
+                    ログ共有をサーバー側でも記録する
+                  </label>
+                  <div style={{ marginTop: '4px', fontSize: '12px', color: '#666' }}>
+                    ON の場合、このドメインの intercept リクエスト内容を injection-tool の SQLite に保存します。
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '15px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px', backgroundColor: '#fff' }}>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedDomain.accessControlEnabled ?? false}
+                      onChange={(e) =>
+                        setSelectedDomain({ ...selectedDomain, accessControlEnabled: e.target.checked })
+                      }
+                    />
+                    ドメインアクセス制限を有効にする
+                  </label>
+                  <div style={{ marginTop: '4px', fontSize: '12px', color: '#666' }}>
+                    ON の場合、Amica 側でこのドメインを選択したときにユーザー認証が必要になります。
+                  </div>
+
+                  <div style={{ marginTop: '12px', display: 'grid', gap: '10px' }}>
+                    {(selectedDomain.accessUsers || []).map((user, index) => (
+                      <div
+                        key={user.id}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) auto',
+                          gap: '8px',
+                          alignItems: 'end',
+                          padding: '10px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '6px',
+                          backgroundColor: '#f8fafc',
+                        }}
+                      >
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '12px' }}>
+                            ユーザー名
+                          </label>
+                          <input
+                            type="text"
+                            value={user.username}
+                            onChange={(e) => {
+                              const nextUsers = [...(selectedDomain.accessUsers || [])];
+                              nextUsers[index] = { ...nextUsers[index], username: e.target.value };
+                              setSelectedDomain({ ...selectedDomain, accessUsers: nextUsers });
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '8px',
+                              border: '1px solid #ddd',
+                              borderRadius: '4px',
+                              boxSizing: 'border-box',
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '12px' }}>
+                            パスワード
+                          </label>
+                          <input
+                            type="password"
+                            value={user.password || ''}
+                            onChange={(e) => {
+                              const nextUsers = [...(selectedDomain.accessUsers || [])];
+                              nextUsers[index] = { ...nextUsers[index], password: e.target.value };
+                              setSelectedDomain({ ...selectedDomain, accessUsers: nextUsers });
+                            }}
+                            placeholder={user.passwordHash ? '変更時のみ入力' : '新規パスワードを入力'}
+                            style={{
+                              width: '100%',
+                              padding: '8px',
+                              border: '1px solid #ddd',
+                              borderRadius: '4px',
+                              boxSizing: 'border-box',
+                            }}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextUsers = (selectedDomain.accessUsers || []).filter((item) => item.id !== user.id);
+                            setSelectedDomain({ ...selectedDomain, accessUsers: nextUsers });
+                          }}
+                          style={{
+                            padding: '8px 12px',
+                            border: 'none',
+                            borderRadius: '4px',
+                            backgroundColor: '#dc2626',
+                            color: 'white',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          削除
+                        </button>
+                      </div>
+                    ))}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextUsers = [...(selectedDomain.accessUsers || [])];
+                        nextUsers.push({
+                          id: `access_user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                          username: '',
+                          password: '',
+                          passwordHash: '',
+                          updatedAt: new Date().toISOString(),
+                        });
+                        setSelectedDomain({ ...selectedDomain, accessUsers: nextUsers, accessControlEnabled: true });
+                      }}
+                      style={{
+                        justifySelf: 'start',
+                        padding: '8px 12px',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '4px',
+                        backgroundColor: '#fff',
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                      }}
+                    >
+                      ユーザー追加
+                    </button>
+
+                    <div style={{ fontSize: '12px', color: '#666' }}>
+                      既存ユーザーのパスワードは空欄のまま保存すると維持されます。新規ユーザー追加時はユーザー名とパスワードの両方を入力してください。
+                    </div>
                   </div>
                 </div>
 
@@ -2915,6 +3361,54 @@ export default function AdminPage() {
                           boxSizing: 'border-box',
                         }}
                       />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                        テーマカラー
+                      </label>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <input
+                          type="color"
+                          value={/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(selectedDomain.themeColor || '') ? selectedDomain.themeColor || '#f472b6' : '#f472b6'}
+                          onChange={(e) =>
+                            setSelectedDomain({ ...selectedDomain, themeColor: e.target.value })
+                          }
+                          style={{ width: '52px', height: '40px', padding: '4px', border: '1px solid #ddd', borderRadius: '6px', backgroundColor: '#fff' }}
+                        />
+                        <input
+                          type="text"
+                          value={selectedDomain.themeColor || ''}
+                          onChange={(e) =>
+                            setSelectedDomain({ ...selectedDomain, themeColor: e.target.value.trim() })
+                          }
+                          placeholder="空欄なら既定色を使用 (#f472b6 など)"
+                          style={{
+                            flex: 1,
+                            padding: '8px',
+                            border: '1px solid #ddd',
+                            borderRadius: '4px',
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDomain({ ...selectedDomain, themeColor: '' })}
+                          style={{
+                            padding: '8px 10px',
+                            border: '1px solid #ddd',
+                            borderRadius: '4px',
+                            backgroundColor: '#fff',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          既定色
+                        </button>
+                      </div>
+                      <div style={{ marginTop: '6px', fontSize: '12px', color: '#666' }}>
+                        チャット名と入力ボタンのアクセント色に使われます。
+                      </div>
                     </div>
 
                     <div>
@@ -3762,6 +4256,226 @@ export default function AdminPage() {
                 </div>
               ) : (
                 <p>ドメインを選択してください</p>
+              )}
+            </main>
+          </>
+        ) : activeTab === 'shared-log' ? (
+          <>
+            <aside style={{ borderRight: '1px solid #ddd', paddingRight: '20px' }}>
+              <h3>履歴条件</h3>
+              <div style={{ display: 'grid', gap: '12px' }}>
+                <label style={{ display: 'grid', gap: '6px' }}>
+                  <span style={{ fontWeight: 600 }}>ドメイン</span>
+                  <select
+                    value={sharedLogFilterDomainId || (selectedDomain?.sharedLogEnabled ? selectedDomain.id : SHARED_LOG_ALL_DOMAINS)}
+                    onChange={(e) => setSharedLogFilterDomainId(e.target.value)}
+                    style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                  >
+                    {selectedDomain?.id && selectedDomain.sharedLogEnabled && (
+                      <option value="">現在の選択ドメイン: {selectedDomain.name}</option>
+                    )}
+                    <option value={SHARED_LOG_ALL_DOMAINS}>全ドメイン</option>
+                    {sharedLogEnabledDomains.map((domain) => (
+                      <option key={domain.id} value={domain.id}>
+                        {domain.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: 'grid', gap: '6px' }}>
+                  <span style={{ fontWeight: 600 }}>表示件数</span>
+                  <select
+                    value={sharedLogsLimit}
+                    onChange={(e) => setSharedLogsLimit(parseInt(e.target.value, 10))}
+                    style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                  >
+                    <option value={20}>20件</option>
+                    <option value={50}>50件</option>
+                    <option value={100}>100件</option>
+                    <option value={200}>200件</option>
+                  </select>
+                </label>
+
+                <label style={{ display: 'grid', gap: '6px' }}>
+                  <span style={{ fontWeight: 600 }}>ユーザー</span>
+                  <select
+                    value={sharedLogFilterUserId}
+                    onChange={(e) => setSharedLogFilterUserId(e.target.value)}
+                    style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                  >
+                    <option value={SHARED_LOG_ALL_USERS}>全ユーザー</option>
+                    {sharedLogAvailableUserIds.map((userId) => (
+                      <option key={userId} value={userId}>
+                        {userId}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: 'grid', gap: '6px' }}>
+                  <span style={{ fontWeight: 600 }}>セッション</span>
+                  <select
+                    value={sharedLogFilterSessionId}
+                    onChange={(e) => setSharedLogFilterSessionId(e.target.value)}
+                    style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                  >
+                    <option value={SHARED_LOG_ALL_SESSIONS}>全セッション</option>
+                    {sharedLogAvailableSessionIds.map((sessionId) => (
+                      <option key={sessionId} value={sessionId}>
+                        {sessionId}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const token = localStorage.getItem('injection_token');
+                    if (!token) {
+                      setMessage('認証情報が見つかりません。再ログインしてください');
+                      return;
+                    }
+
+                    loadDomainSharedLogs(token, {
+                      domainId: effectiveSharedLogDomainId || undefined,
+                      userId: effectiveSharedLogUserId || undefined,
+                      sessionId: effectiveSharedLogSessionId || undefined,
+                      limit: sharedLogsLimit,
+                    });
+                  }}
+                  disabled={sharedLogsLoading}
+                  style={{
+                    padding: '10px 12px',
+                    backgroundColor: sharedLogsLoading ? '#ccc' : '#0066cc',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: sharedLogsLoading ? 'default' : 'pointer',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {sharedLogsLoading ? '読込中...' : '再読込'}
+                </button>
+
+                <div style={{ padding: '12px', backgroundColor: '#f8fafc', borderRadius: '6px', fontSize: '13px', lineHeight: 1.6 }}>
+                  <div>取得件数: {sharedLogs.length} / {sharedLogsTotal}</div>
+                  <div>対象: {effectiveSharedLogDomainId ? sharedLogEnabledDomains.find((domain) => domain.id === effectiveSharedLogDomainId)?.name || effectiveSharedLogDomainId : '全ドメイン'}</div>
+                  <div>ユーザー: {effectiveSharedLogUserId || '全ユーザー'}</div>
+                  <div>セッション: {effectiveSharedLogSessionId || '全セッション'}</div>
+                  {selectedDomain && selectedDomain.sharedLogEnabled === false && (!effectiveSharedLogDomainId || effectiveSharedLogDomainId === selectedDomain.id) && (
+                    <div style={{ marginTop: '8px', color: '#b45309' }}>
+                      現在の選択ドメインではログ記録がOFFです。
+                    </div>
+                  )}
+                </div>
+              </div>
+            </aside>
+
+            <main>
+                  <h2 style={{ marginTop: 0 }}>チャット履歴一覧</h2>
+              <p style={{ color: '#555', marginTop: '0', marginBottom: '16px' }}>
+                    Amica の IndexedDB に保存している履歴と同じ内容を、新しい順で表示します。
+              </p>
+
+              {sharedLogsError && (
+                <div style={{ marginBottom: '16px', padding: '12px', borderRadius: '6px', backgroundColor: '#ffebee', color: '#c62828' }}>
+                  {sharedLogsError}
+                </div>
+              )}
+
+              {sharedLogsLoading ? (
+                <div style={{ padding: '20px', backgroundColor: '#f8fafc', borderRadius: '8px' }}>チャット履歴を読み込み中です...</div>
+              ) : sharedLogs.length === 0 ? (
+                <div style={{ padding: '20px', backgroundColor: '#f8fafc', borderRadius: '8px' }}>該当するチャット履歴はありません。</div>
+              ) : (
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  {sharedLogs.map((log) => {
+                    const domain = domains.find((item) => item.id === log.domainId);
+                    const isExpanded = expandedSharedLogId === log.historyId;
+
+                    return (
+                      <section
+                        key={log.historyId}
+                        style={{
+                          border: '1px solid #d7dee7',
+                          borderRadius: '8px',
+                          padding: '16px',
+                          backgroundColor: '#fff',
+                          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                          <div style={{ flex: '1 1 520px' }}>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                              <span style={{ padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#dbeafe', color: '#1d4ed8', fontSize: '12px', fontWeight: 600 }}>
+                                {domain?.name || log.domainId}
+                              </span>
+                              <span style={{ padding: '2px 8px', borderRadius: '9999px', backgroundColor: log.role === 'user' ? '#dcfce7' : log.role === 'assistant' ? '#ede9fe' : '#e5e7eb', color: log.role === 'user' ? '#166534' : log.role === 'assistant' ? '#6d28d9' : '#374151', fontSize: '12px', fontWeight: 600 }}>
+                                {log.role}
+                              </span>
+                              {log.mcpInfo?.used && (
+                                <span style={{ padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#ecfccb', color: '#3f6212', fontSize: '12px', fontWeight: 600 }}>
+                                  MCP{log.mcpInfo?.toolName ? `: ${log.mcpInfo.toolName}` : ''}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: '13px', color: '#475569', marginBottom: '8px' }}>
+                              {formatAdminTimestamp(log.createdAt)}
+                            </div>
+                            <div style={{ fontWeight: 600, marginBottom: '8px', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                              {log.content}
+                            </div>
+                            <div style={{ display: 'grid', gap: '4px', color: '#475569', fontSize: '13px' }}>
+                              <div>historyId: {log.historyId}</div>
+                              <div>userId: {log.userId || '-'}</div>
+                              <div>sessionId: {log.sessionId || '-'}</div>
+                              <div>dayKey: {log.createdAtDayKey}</div>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setExpandedSharedLogId(isExpanded ? null : log.historyId)}
+                            style={{
+                              padding: '8px 12px',
+                              backgroundColor: isExpanded ? '#e2e8f0' : '#f8fafc',
+                              color: '#0f172a',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontWeight: 600,
+                            }}
+                          >
+                            {isExpanded ? '詳細を閉じる' : '詳細を見る'}
+                          </button>
+                        </div>
+
+                        {isExpanded && (
+                          <div style={{ marginTop: '16px', display: 'grid', gap: '16px' }}>
+                            {Boolean(log.dbResult) && (
+                              <div>
+                                <h4 style={{ margin: '0 0 8px 0' }}>dbResult</h4>
+                                <pre style={{ margin: 0, padding: '12px', backgroundColor: '#0f172a', color: '#e2e8f0', borderRadius: '6px', overflowX: 'auto', fontSize: '12px' }}>
+                                  {JSON.stringify(log.dbResult, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                            {Boolean(log.mcpInfo) && (
+                              <div>
+                                <h4 style={{ margin: '0 0 8px 0' }}>mcpInfo</h4>
+                                <pre style={{ margin: 0, padding: '12px', backgroundColor: '#0f172a', color: '#e2e8f0', borderRadius: '6px', overflowX: 'auto', fontSize: '12px' }}>
+                                  {JSON.stringify(log.mcpInfo, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })}
+                </div>
               )}
             </main>
           </>
@@ -5132,6 +5846,7 @@ export default function AdminPage() {
                         }}
                       >
                         {server.name}
+                        {server.isPreset ? ' 🔒' : ''}
                       </button>
                     </li>
                   ))}
@@ -5150,6 +5865,23 @@ export default function AdminPage() {
                   }}
                   style={{ maxWidth: '600px' }}
                 >
+                  {selectedMcpServer.isPreset && (
+                    <div
+                      style={{
+                        marginBottom: '15px',
+                        padding: '10px 12px',
+                        borderRadius: '4px',
+                        backgroundColor: '#eff6ff',
+                        borderLeft: '4px solid #2563eb',
+                        color: '#1e3a8a',
+                        fontSize: '13px',
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      このMCPサーバーはデフォルトプリセットです。設定の保存はできますが、削除はできません。
+                    </div>
+                  )}
+
                   <div style={{ marginBottom: '15px' }}>
                     <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>サーバー名</label>
                     <input
@@ -5388,6 +6120,13 @@ export default function AdminPage() {
                   <div style={{ marginBottom: '15px', padding: '12px', borderRadius: '4px', backgroundColor: '#f8f9fa' }}>
                     <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>AI Routing設定</div>
 
+                    {selectedMcpServer.id === 'google-workspace' && (
+                      <div style={{ marginBottom: '10px', fontSize: '12px', color: '#b45309', lineHeight: 1.5 }}>
+                        Google Workspace はドメイン側で明示的に有効化された場合のみ利用されます。
+                        セッションの attach だけでは有効化されません。
+                      </div>
+                    )}
+
                     <label style={{ display: 'block', marginBottom: '8px', cursor: 'pointer' }}>
                       <input
                         type="checkbox"
@@ -5474,7 +6213,27 @@ export default function AdminPage() {
                     </div>
 
                     <div style={{ marginBottom: '10px' }}>
-                      <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>System Prompt</label>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px', gap: '10px' }}>
+                        <label style={{ display: 'block', fontWeight: 'bold' }}>System Prompt</label>
+                        <button
+                          type="button"
+                          onClick={handleGenerateMcpSystemPrompt}
+                          disabled={generatingMcpSystemPrompt}
+                          style={{
+                            padding: '6px 10px',
+                            backgroundColor: generatingMcpSystemPrompt ? '#9ca3af' : '#2563eb',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: generatingMcpSystemPrompt ? 'default' : 'pointer',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {generatingMcpSystemPrompt ? '生成中...' : 'Systemプロンプトを更新'}
+                        </button>
+                      </div>
                       <textarea
                         value={selectedMcpServer.aiRouting?.systemPrompt || ''}
                         onChange={(e) => {
@@ -5909,25 +6668,20 @@ export default function AdminPage() {
                     <button
                       type="button"
                       onClick={() => handleDeleteMcpServer(selectedMcpServer.id)}
+                      disabled={selectedMcpServer.isPreset}
                       style={{
                         padding: '10px 20px',
-                        backgroundColor: '#ef5350',
+                        backgroundColor: selectedMcpServer.isPreset ? '#ccc' : '#ef5350',
                         color: 'white',
                         border: 'none',
                         borderRadius: '4px',
-                        cursor: 'pointer',
+                        cursor: selectedMcpServer.isPreset ? 'default' : 'pointer',
                         fontWeight: 'bold',
                       }}
                     >
-                      削除
+                      {selectedMcpServer.isPreset ? '削除不可' : '削除'}
                     </button>
                   </div>
-
-                  {isMcpSaveBlockedByAiAllowedTools && (
-                    <div style={{ marginTop: '-10px', marginBottom: '12px', fontSize: '12px', color: '#c62828' }}>
-                      mode が ai の場合は Allowed Tools を1つ以上設定してください
-                    </div>
-                  )}
 
                   {mcpTestResults[selectedMcpServer.id] && (
                     <div

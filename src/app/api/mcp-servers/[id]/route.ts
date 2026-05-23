@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getMCPServerById,
+  isProtectedMCPServerId,
   updateMCPServer,
   deleteMCPServer,
   validateMCPServerForSave,
@@ -116,6 +117,14 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
   }
 
   const { id } = params;
+
+  if (isProtectedMCPServerId(id)) {
+    return NextResponse.json(
+      { error: 'デフォルトプリセットのMCPサーバーは削除できません' },
+      { status: 400 }
+    );
+  }
+
   const success = deleteMCPServer(id);
 
   if (!success) {

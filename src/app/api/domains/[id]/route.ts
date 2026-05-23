@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, extractToken } from '@/lib/auth';
 import { deleteDomain, getDomainById, updateDomain } from '@/lib/domains';
+import { prepareDomainAccessUsersForSave } from '@/lib/domain-access-auth';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -39,7 +40,15 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     }
 
     const body = await req.json();
-    const updated = updateDomain(params.id, body);
+    const current = getDomainById(params.id);
+    if (!current) {
+      return NextResponse.json({ error: 'ドメインが見つかりません' }, { status: 404 });
+    }
+
+    const updated = updateDomain(params.id, {
+      ...body,
+      accessUsers: prepareDomainAccessUsersForSave(body?.accessUsers, current.accessUsers),
+    });
 
     if (!updated) {
       return NextResponse.json({ error: 'ドメイン更新に失敗しました' }, { status: 400 });

@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
           const chronicle = getChronicleById(id);
           return Boolean(chronicle && chronicle.enabled);
         }),
+        mcpServerIds: Array.isArray(d.mcpServerIds) ? d.mcpServerIds : [],
+        knowledgeIds: Array.isArray(d.knowledgeIds) ? d.knowledgeIds : [],
         vrmUrl: toAbsoluteAssetUrl(d.vrmUrl, origin),
         bgUrl: toAbsoluteAssetUrl(d.bgUrl, origin),
         imageAvatarIdleUrl: toAbsoluteAssetUrl(d.imageAvatarIdleUrl, origin),
@@ -59,7 +61,7 @@ export async function GET(req: NextRequest) {
         headers: {
           'Access-Control-Allow-Origin': CLIENT_ORIGIN,
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Allow-Headers': 'Content-Type, x-domain-access-token',
         },
       }
     );
@@ -74,7 +76,7 @@ export async function OPTIONS() {
     headers: {
       'Access-Control-Allow-Origin': CLIENT_ORIGIN,
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, x-domain-access-token',
       'Access-Control-Max-Age': '86400',
     },
   });
