@@ -158,6 +158,25 @@ interface SharedLogEntry {
 
 interface PublicManagementSettings {
   maxConcurrentSessions: number;
+  chatRequestsPerUserPerMinute: number;
+  ttsRequestsPerUserPerMinute: number;
+}
+
+interface CloudflareTunnelStatus {
+  active: boolean;
+  starting: boolean;
+  publicUrl: string | null;
+  targetUrl: string;
+  pid: number | null;
+  startedAt: number | null;
+  lastError: string | null;
+}
+
+interface CloudflareTunnelTargetOption {
+  id: string;
+  label: string;
+  description: string;
+  url: string;
 }
 
 interface MCPServer {
@@ -348,6 +367,7 @@ export default function AdminPage() {
   const [savingPronunciationSettings, setSavingPronunciationSettings] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [authRedirecting, setAuthRedirecting] = useState(false);
   const [sharedLogs, setSharedLogs] = useState<SharedLogEntry[]>([]);
   const [sharedLogsLoading, setSharedLogsLoading] = useState(false);
   const [sharedLogsError, setSharedLogsError] = useState('');
@@ -375,12 +395,67 @@ export default function AdminPage() {
   const [sbv2TestError, setSbv2TestError] = useState('');
   const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null);
   const [sessionStatusError, setSessionStatusError] = useState('');
-  const [publicSettings, setPublicSettings] = useState<PublicManagementSettings>({ maxConcurrentSessions: 0 });
+  const [publicSettings, setPublicSettings] = useState<PublicManagementSettings>({
+    maxConcurrentSessions: 0,
+    chatRequestsPerUserPerMinute: 0,
+    ttsRequestsPerUserPerMinute: 0,
+  });
   const [savingPublicSettings, setSavingPublicSettings] = useState(false);
+  const [cloudflareTunnelStatus, setCloudflareTunnelStatus] = useState<CloudflareTunnelStatus | null>(null);
+  const [cloudflareTunnelBusy, setCloudflareTunnelBusy] = useState(false);
+  const [cloudflareTunnelError, setCloudflareTunnelError] = useState('');
+  const [selectedTunnelTargetId, setSelectedTunnelTargetId] = useState('amica');
   const [uploadingAsset, setUploadingAsset] = useState<AssetType | null>(null);
   const [deletingAsset, setDeletingAsset] = useState<AssetType | null>(null);
   const sbv2PreviewAudioRef = useRef<HTMLAudioElement | null>(null);
   const sbv2PreviewUrlRef = useRef<string | null>(null);
+  const tunnelTargetOptions = useMemo<CloudflareTunnelTargetOption[]>(() => {
+    const hostname = typeof window !== 'undefined' ? window.location.hostname || '127.0.0.1' : '127.0.0.1';
+
+    return [
+      {
+        id: 'amica',
+        label: 'Amica 本体 (3000)',
+        description: 'チャット本体を公開します。通常はこちらを使います。',
+        url: `http://${hostname}:3000`,
+      },
+      {
+        id: 'admin',
+        label: 'injection-tool 管理 (4001)',
+        description: '遠隔から公開設定や管理画面を触るための公開先です。',
+        url: `http://${hostname}:4001`,
+      },
+    ];
+  }, []);
+  const selectedTunnelTarget =
+    tunnelTargetOptions.find((option) => option.id === selectedTunnelTargetId) || tunnelTargetOptions[0];
+  const redirectToLogin = (reason = 'セッションが無効になりました。再ログインしてください') => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    localStorage.removeItem('injection_token');
+    setMessage(reason);
+    setAuthRedirecting(true);
+    setLoading(false);
+    window.location.replace('/login');
+  };
+  const handleUnauthorizedResponse = (status: number): boolean => {
+    if (status !== 401) {
+      return false;
+    }
+
+    redirectToLogin();
+    return true;
+  };
+  const derivedGlobalChatRequestsPerMinute =
+    publicSettings.maxConcurrentSessions > 0 && publicSettings.chatRequestsPerUserPerMinute > 0
+      ? publicSettings.maxConcurrentSessions * publicSettings.chatRequestsPerUserPerMinute
+      : 0;
+  const derivedGlobalTtsRequestsPerMinute =
+    publicSettings.maxConcurrentSessions > 0 && publicSettings.ttsRequestsPerUserPerMinute > 0
+      ? publicSettings.maxConcurrentSessions * publicSettings.ttsRequestsPerUserPerMinute
+      : 0;
 
   // MCP Server Management
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
@@ -656,14 +731,13 @@ export default function AdminPage() {
     }
 
     if (
-      domainsRes.status === 401 ||
-      knowledgesRes.status === 401 ||
-      chroniclesRes.status === 401 ||
-      pronunciationsRes.status === 401 ||
-      pronunciationSettingsRes.status === 401
+      handleUnauthorizedResponse(domainsRes.status) ||
+      handleUnauthorizedResponse(knowledgesRes.status) ||
+      handleUnauthorizedResponse(chroniclesRes.status) ||
+      handleUnauthorizedResponse(pronunciationsRes.status) ||
+      handleUnauthorizedResponse(pronunciationSettingsRes.status) ||
+      handleUnauthorizedResponse(memoriesRes.status)
     ) {
-      localStorage.removeItem('injection_token');
-      window.location.href = '/login';
       return;
     }
   };
@@ -739,6 +813,10 @@ export default function AdminPage() {
         },
       });
 
+      if (handleUnauthorizedResponse(res.status)) {
+        return;
+      }
+
       if (!res.ok) {
         const error = await res.json().catch(() => null);
         setRuntimeInfoError(error?.error || 'モデル情報の取得に失敗しました');
@@ -779,6 +857,10 @@ export default function AdminPage() {
         },
         cache: 'no-store',
       });
+
+      if (handleUnauthorizedResponse(response.status)) {
+        return;
+      }
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -821,6 +903,10 @@ export default function AdminPage() {
       },
     });
 
+    if (handleUnauthorizedResponse(response.status)) {
+      throw new Error('Unauthorized');
+    }
+
     if (!response.ok) {
       throw new Error(`Failed to load ${type} assets`);
     }
@@ -859,6 +945,10 @@ export default function AdminPage() {
         },
         cache: 'no-store',
       });
+
+      if (handleUnauthorizedResponse(response.status)) {
+        return;
+      }
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -911,6 +1001,10 @@ export default function AdminPage() {
         cache: 'no-store',
       });
 
+      if (handleUnauthorizedResponse(response.status)) {
+        return;
+      }
+
       if (!response.ok) {
         return;
       }
@@ -920,6 +1014,14 @@ export default function AdminPage() {
         maxConcurrentSessions:
           typeof payload?.maxConcurrentSessions === 'number' && Number.isFinite(payload.maxConcurrentSessions)
             ? Math.max(0, Math.floor(payload.maxConcurrentSessions))
+            : 0,
+        chatRequestsPerUserPerMinute:
+          typeof payload?.chatRequestsPerUserPerMinute === 'number' && Number.isFinite(payload.chatRequestsPerUserPerMinute)
+            ? Math.max(0, Math.floor(payload.chatRequestsPerUserPerMinute))
+            : 0,
+        ttsRequestsPerUserPerMinute:
+          typeof payload?.ttsRequestsPerUserPerMinute === 'number' && Number.isFinite(payload.ttsRequestsPerUserPerMinute)
+            ? Math.max(0, Math.floor(payload.ttsRequestsPerUserPerMinute))
             : 0,
       });
     } catch (err) {
@@ -938,6 +1040,10 @@ export default function AdminPage() {
         },
         cache: 'no-store',
       });
+
+      if (handleUnauthorizedResponse(response.status)) {
+        return;
+      }
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -1587,6 +1693,8 @@ export default function AdminPage() {
         },
         body: JSON.stringify({
           maxConcurrentSessions: Math.max(0, Math.floor(publicSettings.maxConcurrentSessions || 0)),
+          chatRequestsPerUserPerMinute: Math.max(0, Math.floor(publicSettings.chatRequestsPerUserPerMinute || 0)),
+          ttsRequestsPerUserPerMinute: Math.max(0, Math.floor(publicSettings.ttsRequestsPerUserPerMinute || 0)),
         }),
       });
 
@@ -1602,12 +1710,134 @@ export default function AdminPage() {
           typeof payload?.maxConcurrentSessions === 'number'
             ? Math.max(0, Math.floor(payload.maxConcurrentSessions))
             : 0,
+        chatRequestsPerUserPerMinute:
+          typeof payload?.chatRequestsPerUserPerMinute === 'number'
+            ? Math.max(0, Math.floor(payload.chatRequestsPerUserPerMinute))
+            : 0,
+        ttsRequestsPerUserPerMinute:
+          typeof payload?.ttsRequestsPerUserPerMinute === 'number'
+            ? Math.max(0, Math.floor(payload.ttsRequestsPerUserPerMinute))
+            : 0,
       });
       setMessage('公開管理設定を保存しました');
     } catch (err) {
       setMessage('公開管理設定の保存中にエラーが発生しました');
     } finally {
       setSavingPublicSettings(false);
+    }
+  };
+
+  const loadCloudflareTunnelStatus = async (token: string) => {
+    try {
+      const response = await fetch('/api/public-management/tunnel', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: 'no-store',
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        setCloudflareTunnelStatus(null);
+        setCloudflareTunnelError(payload?.error || 'Cloudflare Tunnel 状態の取得に失敗しました');
+        return;
+      }
+
+      setCloudflareTunnelStatus(payload as CloudflareTunnelStatus);
+      if (typeof payload?.targetUrl === 'string') {
+        const matchedOption = tunnelTargetOptions.find((option) => option.url === payload.targetUrl);
+        if (matchedOption) {
+          setSelectedTunnelTargetId(matchedOption.id);
+        }
+      }
+      setCloudflareTunnelError(
+        typeof payload?.lastError === 'string' && payload.lastError ? payload.lastError : ''
+      );
+    } catch (err) {
+      setCloudflareTunnelStatus(null);
+      setCloudflareTunnelError('Cloudflare Tunnel 状態の取得中にエラーが発生しました');
+    }
+  };
+
+  const handleStartCloudflareTunnel = async () => {
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    try {
+      setCloudflareTunnelBusy(true);
+      setCloudflareTunnelError('');
+
+      const response = await fetch('/api/public-management/tunnel', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          targetUrl: selectedTunnelTarget?.url,
+        }),
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        setCloudflareTunnelError(payload?.error || 'Cloudflare Tunnel の起動に失敗しました');
+        return;
+      }
+
+      setCloudflareTunnelStatus(payload as CloudflareTunnelStatus);
+      setCloudflareTunnelError(
+        typeof payload?.lastError === 'string' && payload.lastError ? payload.lastError : ''
+      );
+      setMessage(
+        payload?.publicUrl
+          ? `${selectedTunnelTarget?.label || '選択した公開先'} の Cloudflare Tunnel を起動しました`
+          : `${selectedTunnelTarget?.label || '選択した公開先'} の Cloudflare Tunnel 起動を開始しました`
+      );
+    } catch (err) {
+      setCloudflareTunnelError('Cloudflare Tunnel の起動中にエラーが発生しました');
+    } finally {
+      setCloudflareTunnelBusy(false);
+    }
+  };
+
+  const handleStopCloudflareTunnel = async () => {
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    try {
+      setCloudflareTunnelBusy(true);
+      setCloudflareTunnelError('');
+
+      const response = await fetch('/api/public-management/tunnel', {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        setCloudflareTunnelError(payload?.error || 'Cloudflare Tunnel の停止に失敗しました');
+        return;
+      }
+
+      setCloudflareTunnelStatus(payload as CloudflareTunnelStatus);
+      setCloudflareTunnelError('');
+      setMessage('Cloudflare Tunnel を停止しました');
+    } catch (err) {
+      setCloudflareTunnelError('Cloudflare Tunnel の停止中にエラーが発生しました');
+    } finally {
+      setCloudflareTunnelBusy(false);
     }
   };
 
@@ -1649,6 +1879,39 @@ export default function AdminPage() {
     };
 
     fetchStatus();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'public') {
+      setCloudflareTunnelError('');
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setCloudflareTunnelStatus(null);
+      setCloudflareTunnelError('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const fetchTunnelStatus = async () => {
+      await loadCloudflareTunnelStatus(token);
+      if (!cancelled) {
+        timer = setTimeout(fetchTunnelStatus, 5000);
+      }
+    };
+
+    fetchTunnelStatus();
 
     return () => {
       cancelled = true;
@@ -1890,7 +2153,7 @@ export default function AdminPage() {
     // 認証チェック
     const token = localStorage.getItem('injection_token');
     if (!token) {
-      window.location.href = '/login';
+      redirectToLogin('ログインが必要です');
       return;
     }
 
@@ -2669,6 +2932,10 @@ export default function AdminPage() {
   };
 
   const isMcpSaveBlockedByAiAllowedTools = false;
+
+  if (authRedirecting) {
+    return <div style={{ padding: '20px' }}>セッション切れのためログイン画面へ移動中...</div>;
+  }
 
   if (loading) {
     return <div style={{ padding: '20px' }}>読み込み中...</div>;
@@ -5632,6 +5899,92 @@ export default function AdminPage() {
                 </div>
               </div>
 
+              <div style={{ maxWidth: '520px', marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                  1ユーザーあたりの1分間チャット系リクエスト上限
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="number"
+                    min={0}
+                    value={publicSettings.chatRequestsPerUserPerMinute}
+                    onChange={(e) =>
+                      setPublicSettings({
+                        ...publicSettings,
+                        chatRequestsPerUserPerMinute: Math.max(0, parseInt(e.target.value, 10) || 0),
+                      })
+                    }
+                    style={{
+                      width: '140px',
+                      padding: '8px',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <span style={{ fontSize: '13px', color: '#6b7280' }}>
+                    req / 分 / 人（0 で無制限）
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ maxWidth: '520px', marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                  1ユーザーあたりの1分間音声リクエスト上限
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="number"
+                    min={0}
+                    value={publicSettings.ttsRequestsPerUserPerMinute}
+                    onChange={(e) =>
+                      setPublicSettings({
+                        ...publicSettings,
+                        ttsRequestsPerUserPerMinute: Math.max(0, parseInt(e.target.value, 10) || 0),
+                      })
+                    }
+                    style={{
+                      width: '140px',
+                      padding: '8px',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <span style={{ fontSize: '13px', color: '#6b7280' }}>
+                    req / 分 / 人（0 で無制限）
+                  </span>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  maxWidth: '520px',
+                  marginBottom: '18px',
+                  padding: '12px 14px',
+                  borderRadius: '8px',
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid #e5e7eb',
+                  color: '#334155',
+                  fontSize: '13px',
+                  lineHeight: 1.6,
+                }}
+              >
+                <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>現在の全体レート計算</div>
+                <div>
+                  チャット系: {publicSettings.chatRequestsPerUserPerMinute} req / 分 / 人 × {publicSettings.maxConcurrentSessions} 人
+                  = {derivedGlobalChatRequestsPerMinute} req / 分
+                </div>
+                <div>
+                  音声: {publicSettings.ttsRequestsPerUserPerMinute} req / 分 / 人 × {publicSettings.maxConcurrentSessions} 人
+                  = {derivedGlobalTtsRequestsPerMinute} req / 分
+                </div>
+                <div style={{ marginTop: '6px', color: '#64748b' }}>
+                  チャット系は intercept やログインなどの文字系公開 API、音声は Amica の TTS に適用されます。<br />
+                  同時接続数が 0 の場合、全体上限は無効になり、1ユーザー上限のみ適用されます。
+                </div>
+              </div>
+
               {sessionStatus && (
                 <div
                   style={{
@@ -5662,6 +6015,156 @@ export default function AdminPage() {
 
               <div style={{ marginBottom: '16px', fontSize: '12px', color: '#9ca3af' }}>
                 接続数は3秒ごとに自動更新されます。
+              </div>
+
+              <div
+                style={{
+                  maxWidth: '720px',
+                  marginBottom: '18px',
+                  padding: '16px',
+                  borderRadius: '10px',
+                  border: '1px solid #dbeafe',
+                  backgroundColor: '#eff6ff',
+                }}
+              >
+                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#1d4ed8' }}>
+                  Cloudflare Tunnel 公開
+                </div>
+                <div style={{ fontSize: '13px', color: '#334155', lineHeight: 1.7, marginBottom: '12px' }}>
+                  認証なしの一時的な Quick Tunnel を起動します。cloudflared がこのサーバーで実行可能な状態である必要があります。
+                </div>
+                <div style={{ maxWidth: '520px', marginBottom: '12px' }}>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#1e3a8a' }}>
+                    公開先を選択
+                  </label>
+                  <select
+                    value={selectedTunnelTargetId}
+                    onChange={(e) => setSelectedTunnelTargetId(e.target.value)}
+                    disabled={cloudflareTunnelBusy || cloudflareTunnelStatus?.active || cloudflareTunnelStatus?.starting}
+                    style={{
+                      width: '100%',
+                      maxWidth: '420px',
+                      padding: '8px',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: '4px',
+                      boxSizing: 'border-box',
+                      backgroundColor:
+                        cloudflareTunnelBusy || cloudflareTunnelStatus?.active || cloudflareTunnelStatus?.starting
+                          ? '#dbeafe'
+                          : 'white',
+                    }}
+                  >
+                    {tunnelTargetOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div style={{ marginTop: '6px', fontSize: '12px', color: '#475569', lineHeight: 1.6 }}>
+                    {selectedTunnelTarget?.description}
+                  </div>
+                  <div style={{ marginTop: '4px', fontSize: '12px', color: '#64748b', lineHeight: 1.6 }}>
+                    起動中は公開先を切り替えられません。切り替える場合は一度停止してください。
+                  </div>
+                </div>
+                <div style={{ fontSize: '13px', color: '#334155', lineHeight: 1.7, marginBottom: '12px' }}>
+                  転送先: {cloudflareTunnelStatus?.targetUrl || selectedTunnelTarget?.url || 'http://127.0.0.1:3000'}
+                </div>
+
+                {cloudflareTunnelStatus?.publicUrl && (
+                  <div style={{ marginBottom: '12px', fontSize: '13px', lineHeight: 1.7 }}>
+                    公開 URL:{' '}
+                    <a
+                      href={cloudflareTunnelStatus.publicUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: '#2563eb', fontWeight: 'bold', wordBreak: 'break-all' }}
+                    >
+                      {cloudflareTunnelStatus.publicUrl}
+                    </a>
+                  </div>
+                )}
+
+                <div style={{ marginBottom: '12px', fontSize: '12px', color: '#475569' }}>
+                  状態: {cloudflareTunnelStatus?.active ? '公開中' : cloudflareTunnelStatus?.starting ? '起動中' : '停止中'}
+                  {typeof cloudflareTunnelStatus?.pid === 'number' ? ` / PID: ${cloudflareTunnelStatus.pid}` : ''}
+                </div>
+
+                {cloudflareTunnelError && (
+                  <div style={{ marginBottom: '12px', fontSize: '12px', color: '#b91c1c' }}>
+                    {cloudflareTunnelError}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={handleStartCloudflareTunnel}
+                    disabled={cloudflareTunnelBusy || cloudflareTunnelStatus?.active || cloudflareTunnelStatus?.starting}
+                    style={{
+                      padding: '10px 16px',
+                      backgroundColor:
+                        cloudflareTunnelBusy || cloudflareTunnelStatus?.active || cloudflareTunnelStatus?.starting
+                          ? '#93c5fd'
+                          : '#2563eb',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor:
+                        cloudflareTunnelBusy || cloudflareTunnelStatus?.active || cloudflareTunnelStatus?.starting
+                          ? 'default'
+                          : 'pointer',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    {cloudflareTunnelBusy && cloudflareTunnelStatus?.starting ? '起動中...' : 'Cloudflare Tunnel を起動'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStopCloudflareTunnel}
+                    disabled={cloudflareTunnelBusy || (!cloudflareTunnelStatus?.active && !cloudflareTunnelStatus?.starting)}
+                    style={{
+                      padding: '10px 16px',
+                      backgroundColor:
+                        cloudflareTunnelBusy || (!cloudflareTunnelStatus?.active && !cloudflareTunnelStatus?.starting)
+                          ? '#cbd5e1'
+                          : '#475569',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor:
+                        cloudflareTunnelBusy || (!cloudflareTunnelStatus?.active && !cloudflareTunnelStatus?.starting)
+                          ? 'default'
+                          : 'pointer',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    停止
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const token = localStorage.getItem('injection_token');
+                      if (!token) {
+                        setMessage('認証情報が見つかりません。再ログインしてください');
+                        return;
+                      }
+                      loadCloudflareTunnelStatus(token);
+                    }}
+                    disabled={cloudflareTunnelBusy}
+                    style={{
+                      padding: '10px 16px',
+                      backgroundColor: cloudflareTunnelBusy ? '#e5e7eb' : '#f8fafc',
+                      color: '#334155',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '4px',
+                      cursor: cloudflareTunnelBusy ? 'default' : 'pointer',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    状態を更新
+                  </button>
+                </div>
               </div>
 
               <button

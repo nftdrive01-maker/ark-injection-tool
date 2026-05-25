@@ -1,3 +1,5 @@
 {
-  "maxConcurrentSessions": 3
+  "maxConcurrentSessions": 3,
+  "chatRequestsPerUserPerMinute": 10,
+  "ttsRequestsPerUserPerMinute": 60
 }

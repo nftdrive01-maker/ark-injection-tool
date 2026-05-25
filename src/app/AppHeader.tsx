@@ -1,6 +1,11 @@
 'use client';
 
+import { usePathname } from 'next/navigation';
+
 export default function AppHeader() {
+  const pathname = usePathname();
+  const showLogoutButton = pathname !== '/login';
+
   return (
     <header
       style={{
@@ -29,23 +34,25 @@ export default function AppHeader() {
         Ark-i
       </a>
 
-      <button
-        onClick={() => {
-          localStorage.removeItem('injection_token');
-          window.location.href = '/login';
-        }}
-        style={{
-          padding: '8px 14px',
-          backgroundColor: '#ef4444',
-          color: '#fff',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer',
-          fontWeight: 700,
-        }}
-      >
-        ログアウト
-      </button>
+      {showLogoutButton ? (
+        <button
+          onClick={() => {
+            localStorage.removeItem('injection_token');
+            window.location.href = '/login';
+          }}
+          style={{
+            padding: '8px 14px',
+            backgroundColor: '#ef4444',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: 700,
+          }}
+        >
+          ログアウト
+        </button>
+      ) : null}
     </header>
   );
 }

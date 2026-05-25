@@ -11,6 +11,8 @@ import {
   verifyDomainAccessFromToken,
 } from '@/lib/domain-access-control';
 import { getAttachedPackIds } from '@/lib/sessions';
+import { getPublicManagementSettings } from '@/lib/public-management';
+import { applyPublicRateLimit } from '@/lib/rate-limit';
 
 /**
  * 注入インターセプト API
@@ -525,6 +527,17 @@ export async function POST(req: NextRequest) {
     const accessResult = verifyDomainAccessFromToken(targetDomainId, getDomainAccessTokenFromRequest(req));
     if (!accessResult.ok) {
       return createDomainAccessErrorResponse(accessResult.reason, corsHeaders);
+    }
+
+    const rateLimitResponse = applyPublicRateLimit(
+      req,
+      getPublicManagementSettings(),
+      'intercept',
+      'chat',
+      corsHeaders,
+    );
+    if (rateLimitResponse) {
+      return rateLimitResponse;
     }
 
     const firstChronicleId = Array.isArray(domain.chronicleIds) && domain.chronicleIds.length > 0

@@ -4,6 +4,8 @@ import {
   issueDomainTokenForUser,
   verifyDomainUserCredentials,
 } from '@/lib/domain-access-control';
+import { getPublicManagementSettings } from '@/lib/public-management';
+import { applyPublicRateLimit } from '@/lib/rate-limit';
 
 const CLIENT_ORIGIN = process.env.NEXT_PUBLIC_AMICA_ORIGIN || 'http://localhost:3000';
 
@@ -19,6 +21,17 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   try {
+    const rateLimitResponse = applyPublicRateLimit(
+      req,
+      getPublicManagementSettings(),
+      'ドメイン認証',
+      'chat',
+      CORS_HEADERS,
+    );
+    if (rateLimitResponse) {
+      return rateLimitResponse;
+    }
+
     const body = await req.json().catch(() => null);
     const domainId = String(body?.domainId || '').trim();
     const username = String(body?.username || '').trim();

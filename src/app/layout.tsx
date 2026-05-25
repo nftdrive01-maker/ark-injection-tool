@@ -4,6 +4,16 @@ import AppHeader from './AppHeader';
 export const metadata = {
   title: 'Ark-i 管理画面',
   description: 'Ark-i管理画面（知識注入・ドメイン管理）',
+  manifest: '/icon/manifest.json',
+  icons: {
+    icon: [
+      { url: '/icon/icon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/icon/icon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/icon/favicon.ico' },
+    ],
+    apple: [{ url: '/icon/apple-touch-icon-180x180.png', sizes: '180x180', type: 'image/png' }],
+    shortcut: ['/icon/icon-32x32.png'],
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
