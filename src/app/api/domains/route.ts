@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, extractToken } from '@/lib/auth';
-import { createDomain, getAllDomains } from '@/lib/domains';
+import { createDomain, DUPLICATE_DOMAIN_NAME_ERROR, getAllDomains } from '@/lib/domains';
 import { prepareDomainAccessUsersForSave } from '@/lib/domain-access-auth';
 
 export async function GET(req: NextRequest) {
@@ -70,6 +70,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(created, { status: 201 });
   } catch (err) {
+    if (err instanceof Error && err.message === DUPLICATE_DOMAIN_NAME_ERROR) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+
     console.error('Create domain error:', err);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });
   }

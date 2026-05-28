@@ -2,9 +2,12 @@
 
 import { FormEvent, useState } from 'react';
 
+const SESSION_AUTH_PLACEHOLDER = 'cookie-session';
+
 export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -22,8 +25,8 @@ export default function LoginPage() {
 
       const data = await res.json();
 
-      if (res.ok && data.token) {
-        localStorage.setItem('injection_token', data.token);
+      if (res.ok) {
+        localStorage.setItem('injection_token', SESSION_AUTH_PLACEHOLDER);
         window.location.href = '/admin';
       } else {
         setError(data.error || 'ログイン失敗');
@@ -86,20 +89,89 @@ export default function LoginPage() {
             <label htmlFor="password" style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
               パスワード
             </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              style={{
-                width: '100%',
-                padding: '10px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                boxSizing: 'border-box',
-              }}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  paddingRight: '42px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? 'パスワードを非表示' : 'パスワードを表示'}
+                aria-pressed={showPassword}
+                title={showPassword ? 'パスワードを非表示' : 'パスワードを表示'}
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  right: '10px',
+                  transform: 'translateY(-50%)',
+                  width: '24px',
+                  height: '24px',
+                  padding: 0,
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#666',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {showPassword ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M3 3L21 21"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M10.58 10.58C10.21 10.95 10 11.46 10 12C10 13.1 10.9 14 12 14C12.54 14 13.05 13.79 13.42 13.42"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M9.88 4.24C10.56 4.08 11.27 4 12 4C17 4 20.27 7.11 21.54 8.58C22.15 9.29 22.15 10.33 21.54 11.04C21.09 11.56 20.49 12.2 19.74 12.83"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M6.61 6.62C4.62 7.87 3.26 9.65 2.46 10.58C1.85 11.29 1.85 12.33 2.46 13.04C3.73 14.51 7 17.62 12 17.62C13.86 17.62 15.48 17.19 16.87 16.54"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M2.46 12.04C3.73 10.57 7 7.46 12 7.46C17 7.46 20.27 10.57 21.54 12.04C22.15 12.75 22.15 13.79 21.54 14.5C20.27 15.97 17 19.08 12 19.08C7 19.08 3.73 15.97 2.46 14.5C1.85 13.79 1.85 12.75 2.46 12.04Z"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <circle cx="12" cy="12.77" r="3" stroke="currentColor" strokeWidth="2" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
           {error && (
             <div

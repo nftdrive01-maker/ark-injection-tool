@@ -79,6 +79,8 @@ interface KnowledgeDomainStore {
   chronicles: Chronicle[];
 }
 
+export const DUPLICATE_DOMAIN_NAME_ERROR = '同じ名前のドメインは登録できません';
+
 export interface FullBackupData {
   exportedAt: string;
   version: string;
@@ -156,6 +158,58 @@ function sanitizeId(value: string, fallback: string): string {
     .replace(/^_+|_+$/g, '');
 
   return normalized || fallback;
+}
+
+function normalizeDomainName(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
+}
+
+function hasDomainNameConflictInStore(store: KnowledgeDomainStore, name: string, excludeId?: string): boolean {
+  const normalized = normalizeDomainName(name);
+  if (!normalized) {
+    return false;
+  }
+
+  return store.domains.some((domain) => {
+    if (excludeId && domain.id === excludeId) {
+      return false;
+    }
+
+    return normalizeDomainName(domain.name) === normalized;
+  });
+}
+
+function normalizeChronicleName(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
+}
+
+function getUniqueChronicleName(store: KnowledgeDomainStore, requestedName: string, excludeId?: string): string {
+  const trimmedName = requestedName.trim();
+  if (!trimmedName) {
+    return requestedName;
+  }
+
+  const existingNames = new Set(
+    store.chronicles
+      .filter((chronicle) => !excludeId || chronicle.id !== excludeId)
+      .map((chronicle) => normalizeChronicleName(chronicle.name))
+      .filter(Boolean),
+  );
+
+  if (!existingNames.has(normalizeChronicleName(trimmedName))) {
+    return trimmedName;
+  }
+
+  let suffix = 2;
+  while (existingNames.has(normalizeChronicleName(`${trimmedName} (${suffix})`))) {
+    suffix += 1;
+  }
+
+  return `${trimmedName} (${suffix})`;
+}
+
+export function hasDomainNameConflict(name: string, excludeId?: string): boolean {
+  return hasDomainNameConflictInStore(loadStoreFromFile(), name, excludeId);
 }
 
 /**
@@ -384,6 +438,10 @@ export function updateDomain(id: string, updates: Partial<Domain>): ResolvedDoma
     return null;
   }
 
+  if (typeof updates.name === 'string' && hasDomainNameConflictInStore(store, updates.name, id)) {
+    throw new Error(DUPLICATE_DOMAIN_NAME_ERROR);
+  }
+
   const updated: Domain = {
     ...store.domains[index],
     ...updates,
@@ -553,6 +611,10 @@ export function createDomain(input: {
   ttl?: number;
 }): ResolvedDomain {
   const store = loadStoreFromFile();
+  if (hasDomainNameConflictInStore(store, input.name)) {
+    throw new Error(DUPLICATE_DOMAIN_NAME_ERROR);
+  }
+
   const baseId = sanitizeId(input.name, 'domain');
 
   let id = baseId;
@@ -735,7 +797,8 @@ export function createChronicle(input: {
   lastConnectedAt?: string;
 }): Chronicle {
   const store = loadStoreFromFile();
-  const baseId = sanitizeId(input.name, 'chronicle');
+  const uniqueName = getUniqueChronicleName(store, input.name);
+  const baseId = sanitizeId(uniqueName, 'chronicle');
 
   let id = baseId;
   let suffix = 1;
@@ -746,7 +809,7 @@ export function createChronicle(input: {
 
   const created: Chronicle = {
     id,
-    name: input.name,
+    name: uniqueName,
     description: input.description || '',
     host: input.host,
     apiPort: input.apiPort,
@@ -770,10 +833,16 @@ export function updateChronicle(id: string, updates: Partial<Chronicle>): Chroni
     return null;
   }
 
+  const nextName =
+    typeof updates.name === 'string'
+      ? getUniqueChronicleName(store, updates.name, id)
+      : store.chronicles[index].name;
+
   const updated: Chronicle = {
     ...store.chronicles[index],
     ...updates,
     id: store.chronicles[index].id,
+    name: nextName,
     updatedAt: new Date().toISOString(),
   };
 

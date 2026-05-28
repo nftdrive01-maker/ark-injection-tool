@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
         },
       }
     );
-  } catch (err) {
+  } catch {
     return NextResponse.json({ domains: [], defaultDomainId: null }, { status: 200 });
   }
 }

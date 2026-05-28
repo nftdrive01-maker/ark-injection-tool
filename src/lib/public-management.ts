@@ -11,6 +11,10 @@ type PublicManagementSettingsInput = Partial<PublicManagementSettings> & {
   requestsPerUserPerMinute?: number;
 };
 
+type LegacyDomainConfig = {
+  maxConcurrentSessions?: unknown;
+};
+
 const PUBLIC_SETTINGS_PATH =
   process.env.INJECTION_PUBLIC_SETTINGS_CONFIG || './data/public-settings.json';
 const DOMAINS_CONFIG_PATH = process.env.INJECTION_DOMAINS_CONFIG || './data/domains.json';
@@ -105,7 +109,7 @@ function readLegacyMaxConcurrentFromDomains(): number | null {
     let migratedMax = 0;
     let foundLegacy = false;
     for (const domain of domains) {
-      const raw = Number((domain as any)?.maxConcurrentSessions);
+      const raw = Number((domain as LegacyDomainConfig)?.maxConcurrentSessions);
       if (!Number.isFinite(raw)) {
         continue;
       }

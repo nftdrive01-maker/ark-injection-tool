@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import {
   getDerivedGlobalChatRequestsPerMinute,
   getPublicManagementSettings,
@@ -13,11 +13,11 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-export async function OPTIONS(_req: NextRequest) {
+export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
-export async function GET(_req: NextRequest) {
+export async function GET() {
   const settings = getPublicManagementSettings();
   return NextResponse.json(
     {

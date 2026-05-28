@@ -129,6 +129,12 @@ interface SessionStatus {
   available: boolean;
 }
 
+interface AdminLoginHistoryEntry {
+  timestamp: string;
+  ip: string;
+  success: boolean;
+}
+
 interface SharedLogEntry {
   historyId: string;
   domainId: string;
@@ -153,6 +159,41 @@ interface SharedLogEntry {
     used?: boolean;
     serverId?: string;
     toolName?: string;
+  };
+}
+
+interface DomainTestChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: number;
+}
+
+interface DomainTestChatResult {
+  backend?: string;
+  modelName?: string;
+  intercept?: {
+    dbResult?: {
+      title?: string;
+      sourceName?: string;
+      toolName?: string;
+      summary?: string;
+    };
+    chronicle?: {
+      title?: string;
+      content?: string;
+      sourceName?: string;
+    };
+    metadata?: {
+      requestId?: string;
+      mcpUsed?: boolean;
+      mcpServerId?: string;
+      mcpToolName?: string;
+      mcpError?: string;
+      chronicleUsed?: boolean;
+      chronicleName?: string;
+      chronicleError?: string;
+    };
   };
 }
 
@@ -235,6 +276,7 @@ const DEFAULT_GAZE_GREETINGS = [
 const DANGER_LINE_PERCENT = 90;
 const WARNING_LINE_PERCENT = 75;
 const SELECTED_DOMAIN_STORAGE_KEY = 'arki_selected_domain_id';
+const SESSION_AUTH_PLACEHOLDER = 'cookie-session';
 const SHARED_LOG_ALL_DOMAINS = '__all__';
 const SHARED_LOG_ALL_USERS = '__all__';
 const SHARED_LOG_ALL_SESSIONS = '__all__';
@@ -246,6 +288,8 @@ interface DomainPromptTemplate {
   description: string;
   content: string;
 }
+
+type DomainSubTab = 'basic' | 'prompt' | 'experience' | 'connections' | 'test';
 
 const DOMAIN_PROMPT_TEMPLATES: DomainPromptTemplate[] = [
   {
@@ -325,6 +369,26 @@ function formatAdminTimestamp(value: number): string {
   return new Date(value).toLocaleString('ja-JP');
 }
 
+function formatSharedLogRoleLabel(role: SharedLogEntry['role']): string {
+  if (role === 'user') {
+    return 'あなた';
+  }
+
+  if (role === 'assistant') {
+    return '応答';
+  }
+
+  return 'システム';
+}
+
+function createDownloadTimestamp(): string {
+  return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+}
+
+function sanitizeDownloadLabel(value: string): string {
+  return value.trim().replace(/[\\/:*?"<>|\s]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
+
 function normalizeAdminDomain(domain: Domain): Domain {
   return {
     ...domain,
@@ -342,8 +406,19 @@ function normalizeAdminDomain(domain: Domain): Domain {
   };
 }
 
+function createAdminPreviewSessionId(domainId: string): string {
+  return `admin-preview-${domainId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export default function AdminPage() {
   const showDomainSiteAnalysis = false;
+  const domainSubTabs: Array<{ id: DomainSubTab; label: string; description: string }> = [
+    { id: 'basic', label: '基本設定', description: '有効化、説明、アクセス制御、TTL' },
+    { id: 'prompt', label: 'プロンプト', description: 'テンプレート、ベースプロンプト、コンテキスト' },
+    { id: 'experience', label: '表示・TTS', description: '見た目、アバター、読み上げ、視線起動' },
+    { id: 'connections', label: '連携・構成', description: 'ナレッジ、MCP、CHRONICLE、メモリー' },
+    { id: 'test', label: 'テストチャット', description: '未保存設定のまま応答とMCP挙動を確認' },
+  ];
 
   const [domains, setDomains] = useState<Domain[]>([]);
   const [knowledges, setKnowledges] = useState<Knowledge[]>([]);
@@ -352,6 +427,7 @@ export default function AdminPage() {
     wanaKanaEnabled: false,
   });
   const [activeTab, setActiveTab] = useState<'domain' | 'shared-log' | 'knowledge' | 'chronicle' | 'asset' | 'pronunciation' | 'public' | 'mcp'>('domain');
+  const [activeDomainSubTab, setActiveDomainSubTab] = useState<DomainSubTab>('basic');
   const [selectedDomain, setSelectedDomain] = useState<Domain | null>(null);
   const [selectedKnowledge, setSelectedKnowledge] = useState<Knowledge | null>(null);
   const [chronicles, setChronicles] = useState<Chronicle[]>([]);
@@ -373,6 +449,7 @@ export default function AdminPage() {
   const [sharedLogsError, setSharedLogsError] = useState('');
   const [sharedLogsTotal, setSharedLogsTotal] = useState(0);
   const [sharedLogsLimit, setSharedLogsLimit] = useState(50);
+  const [sharedLogDownloadBusy, setSharedLogDownloadBusy] = useState(false);
   const [sharedLogFilterDomainId, setSharedLogFilterDomainId] = useState('');
   const [sharedLogFilterUserId, setSharedLogFilterUserId] = useState(SHARED_LOG_ALL_USERS);
   const [sharedLogAvailableUserIds, setSharedLogAvailableUserIds] = useState<string[]>([]);
@@ -395,6 +472,9 @@ export default function AdminPage() {
   const [sbv2TestError, setSbv2TestError] = useState('');
   const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null);
   const [sessionStatusError, setSessionStatusError] = useState('');
+  const [adminLoginHistory, setAdminLoginHistory] = useState<AdminLoginHistoryEntry[]>([]);
+  const [adminLoginHistoryLoading, setAdminLoginHistoryLoading] = useState(false);
+  const [adminLoginHistoryError, setAdminLoginHistoryError] = useState('');
   const [publicSettings, setPublicSettings] = useState<PublicManagementSettings>({
     maxConcurrentSessions: 0,
     chatRequestsPerUserPerMinute: 0,
@@ -407,8 +487,14 @@ export default function AdminPage() {
   const [selectedTunnelTargetId, setSelectedTunnelTargetId] = useState('amica');
   const [uploadingAsset, setUploadingAsset] = useState<AssetType | null>(null);
   const [deletingAsset, setDeletingAsset] = useState<AssetType | null>(null);
+  const [domainTestChatMessages, setDomainTestChatMessages] = useState<DomainTestChatMessage[]>([]);
+  const [domainTestChatInput, setDomainTestChatInput] = useState('');
+  const [domainTestChatBusy, setDomainTestChatBusy] = useState(false);
+  const [domainTestChatError, setDomainTestChatError] = useState('');
+  const [domainTestChatResult, setDomainTestChatResult] = useState<DomainTestChatResult | null>(null);
   const sbv2PreviewAudioRef = useRef<HTMLAudioElement | null>(null);
   const sbv2PreviewUrlRef = useRef<string | null>(null);
+  const domainTestChatSessionIdRef = useRef('');
   const tunnelTargetOptions = useMemo<CloudflareTunnelTargetOption[]>(() => {
     const hostname = typeof window !== 'undefined' ? window.location.hostname || '127.0.0.1' : '127.0.0.1';
 
@@ -422,7 +508,7 @@ export default function AdminPage() {
       {
         id: 'admin',
         label: 'injection-tool 管理 (4001)',
-        description: '遠隔から公開設定や管理画面を触るための公開先です。',
+        description: '管理画面を公開します。通常は避け、必要時のみ強い認証情報で限定公開してください。',
         url: `http://${hostname}:4001`,
       },
     ];
@@ -474,6 +560,18 @@ export default function AdminPage() {
   const [mcpImportUrl, setMcpImportUrl] = useState('');
   const [mcpImporting, setMcpImporting] = useState(false);
   const [mcpImportError, setMcpImportError] = useState('');
+
+  useEffect(() => {
+    setActiveDomainSubTab('basic');
+    setDomainTestChatMessages([]);
+    setDomainTestChatError('');
+    setDomainTestChatResult(null);
+    if (selectedDomain?.id) {
+      domainTestChatSessionIdRef.current = createAdminPreviewSessionId(selectedDomain.id);
+    } else {
+      domainTestChatSessionIdRef.current = '';
+    }
+  }, [selectedDomain?.id]);
   const [chronicleDiscoverHost, setChronicleDiscoverHost] = useState('127.0.0.1');
   const [chronicleDiscoverApiPort, setChronicleDiscoverApiPort] = useState(8000);
   const [chronicleDiscoverTcpPort, setChronicleDiscoverTcpPort] = useState(8001);
@@ -508,7 +606,7 @@ export default function AdminPage() {
       .filter((item) => item.length > 0);
   };
 
-  const validateAllowedTools = (tools: string[], _aiEnabled: boolean): string => {
+  const validateAllowedTools = (tools: string[]): string => {
     const uniqueCount = new Set(tools).size;
     if (uniqueCount !== tools.length) {
       return 'Allowed Toolsに重複があります';
@@ -527,7 +625,7 @@ export default function AdminPage() {
     const next = Array.from(new Set([...current, ...preset]));
 
     setMcpAiAllowedToolInput('');
-    setMcpAiAllowedToolsError(validateAllowedTools(next, selectedMcpServer.aiRouting?.enabled ?? false));
+    setMcpAiAllowedToolsError(validateAllowedTools(next));
     setSelectedMcpServer({
       ...selectedMcpServer,
       aiRouting: {
@@ -657,6 +755,11 @@ export default function AdminPage() {
     return sharedLogFilterSessionId;
   }, [sharedLogFilterSessionId]);
 
+  const sortedSharedLogs = useMemo(
+    () => [...sharedLogs].sort((left, right) => right.createdAt - left.createdAt),
+    [sharedLogs],
+  );
+
   const loadAllData = async (token: string) => {
     const [domainsRes, knowledgesRes, chroniclesRes, pronunciationsRes, pronunciationSettingsRes, memoriesRes] = await Promise.all([
       fetch('/api/domains', {
@@ -760,6 +863,34 @@ export default function AdminPage() {
       console.error('Failed to load memories:', err);
     } finally {
       setLoadingMemories(false);
+    }
+  };
+
+  const loadAdminLoginHistory = async (token: string) => {
+    try {
+      setAdminLoginHistoryLoading(true);
+      setAdminLoginHistoryError('');
+      const response = await fetch('/api/admin-login-history?limit=100', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (handleUnauthorizedResponse(response.status)) {
+        return;
+      }
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        setAdminLoginHistoryError(payload?.error || 'ログイン履歴の取得に失敗しました');
+        return;
+      }
+
+      const payload = await response.json();
+      setAdminLoginHistory(Array.isArray(payload?.items) ? payload.items : []);
+    } catch (err) {
+      console.error(err);
+      setAdminLoginHistoryError('ログイン履歴の取得中にエラーが発生しました');
+    } finally {
+      setAdminLoginHistoryLoading(false);
     }
   };
 
@@ -917,8 +1048,17 @@ export default function AdminPage() {
     }
 
     return payload.files
-      .filter((item: any) => item && typeof item.name === 'string' && typeof item.url === 'string')
-      .map((item: any) => ({ name: item.name, url: item.url }));
+      .filter((item: unknown): item is AssetFile => {
+        return Boolean(
+          item &&
+          typeof item === 'object' &&
+          'name' in item &&
+          'url' in item &&
+          typeof item.name === 'string' &&
+          typeof item.url === 'string'
+        );
+      })
+        .map((item: AssetFile) => ({ name: item.name, url: item.url }));
   };
 
   const loadAllAssets = async (token: string) => {
@@ -964,8 +1104,10 @@ export default function AdminPage() {
       }
 
       const normalized = payload.models
-        .filter((item: any) => item && typeof item.id === 'string')
-        .map((item: any) => ({
+        .filter((item: unknown): item is Record<string, unknown> & { id: string } => {
+          return Boolean(item && typeof item === 'object' && 'id' in item && typeof item.id === 'string');
+        })
+        .map((item: Record<string, unknown> & { id: string }) => ({
           id: String(item.id),
           name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : String(item.id),
           speakerNames: Array.isArray(item.speakerNames)
@@ -1158,7 +1300,7 @@ export default function AdminPage() {
       const aiRouting = serverToSave.aiRouting;
       if (aiRouting) {
         const normalizedAllowedTools = normalizeAllowedTools(aiRouting.allowedTools);
-        const aiValidationError = validateAllowedTools(normalizedAllowedTools, aiRouting.enabled);
+        const aiValidationError = validateAllowedTools(normalizedAllowedTools);
         if (aiValidationError) {
           setMessage(aiValidationError);
           return;
@@ -1720,7 +1862,7 @@ export default function AdminPage() {
             : 0,
       });
       setMessage('公開管理設定を保存しました');
-    } catch (err) {
+    } catch {
       setMessage('公開管理設定の保存中にエラーが発生しました');
     } finally {
       setSavingPublicSettings(false);
@@ -1755,7 +1897,7 @@ export default function AdminPage() {
       setCloudflareTunnelError(
         typeof payload?.lastError === 'string' && payload.lastError ? payload.lastError : ''
       );
-    } catch (err) {
+    } catch {
       setCloudflareTunnelStatus(null);
       setCloudflareTunnelError('Cloudflare Tunnel 状態の取得中にエラーが発生しました');
     }
@@ -1799,7 +1941,7 @@ export default function AdminPage() {
           ? `${selectedTunnelTarget?.label || '選択した公開先'} の Cloudflare Tunnel を起動しました`
           : `${selectedTunnelTarget?.label || '選択した公開先'} の Cloudflare Tunnel 起動を開始しました`
       );
-    } catch (err) {
+    } catch {
       setCloudflareTunnelError('Cloudflare Tunnel の起動中にエラーが発生しました');
     } finally {
       setCloudflareTunnelBusy(false);
@@ -1834,7 +1976,7 @@ export default function AdminPage() {
       setCloudflareTunnelStatus(payload as CloudflareTunnelStatus);
       setCloudflareTunnelError('');
       setMessage('Cloudflare Tunnel を停止しました');
-    } catch (err) {
+    } catch {
       setCloudflareTunnelError('Cloudflare Tunnel の停止中にエラーが発生しました');
     } finally {
       setCloudflareTunnelBusy(false);
@@ -1867,7 +2009,7 @@ export default function AdminPage() {
           setSessionStatus(data);
           setSessionStatusError('');
         }
-      } catch (err) {
+      } catch {
         if (!cancelled) {
           setSessionStatusError('接続状況の取得に失敗しました');
         }
@@ -2039,6 +2181,100 @@ export default function AdminPage() {
     }
   };
 
+  const handleSendDomainTestChat = async () => {
+    if (!selectedDomain) {
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      redirectToLogin('ログインが必要です');
+      return;
+    }
+
+    const userText = domainTestChatInput.trim();
+    if (!userText) {
+      setDomainTestChatError('テストメッセージを入力してください');
+      return;
+    }
+
+    if (!domainTestChatSessionIdRef.current) {
+      domainTestChatSessionIdRef.current = createAdminPreviewSessionId(selectedDomain.id);
+    }
+
+    const userMessage: DomainTestChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: userText,
+      createdAt: Date.now(),
+    };
+    const messageHistory = domainTestChatMessages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+
+    try {
+      setDomainTestChatBusy(true);
+      setDomainTestChatError('');
+      setDomainTestChatMessages((prev) => [...prev, userMessage]);
+      setDomainTestChatInput('');
+
+      const response = await fetch('/api/domain-test-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          domainId: selectedDomain.id,
+          draftDomain: selectedDomain,
+          userText,
+          sessionId: domainTestChatSessionIdRef.current,
+          messageHistory,
+        }),
+      });
+
+      if (handleUnauthorizedResponse(response.status)) {
+        return;
+      }
+
+      const payload = await response.json().catch(() => null) as
+        | ({ assistantMessage?: string; error?: string } & DomainTestChatResult)
+        | null;
+
+      if (!response.ok) {
+        setDomainTestChatError(payload?.error || 'テストチャットの実行に失敗しました');
+        return;
+      }
+
+      const assistantMessage = typeof payload?.assistantMessage === 'string' ? payload.assistantMessage.trim() : '';
+      if (!assistantMessage) {
+        setDomainTestChatError('モデル応答が空でした');
+        return;
+      }
+
+      setDomainTestChatMessages((prev) => [
+        ...prev,
+        {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content: assistantMessage,
+          createdAt: Date.now(),
+        },
+      ]);
+      setDomainTestChatResult({
+        backend: payload?.backend,
+        modelName: payload?.modelName,
+        intercept: payload?.intercept,
+      });
+    } catch (err) {
+      console.error('Failed to execute domain test chat:', err);
+      setDomainTestChatError('テストチャット実行時にエラーが発生しました');
+    } finally {
+      setDomainTestChatBusy(false);
+    }
+  };
+
   const handleUploadAsset = async (type: AssetType, file: File | null) => {
     if (!file) {
       return;
@@ -2150,6 +2386,14 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    localStorage.setItem('injection_token', SESSION_AUTH_PLACEHOLDER);
+  }, []);
+
+  useEffect(() => {
     // 認証チェック
     const token = localStorage.getItem('injection_token');
     if (!token) {
@@ -2165,6 +2409,7 @@ export default function AdminPage() {
         await loadAllAssets(token);
         await loadSbv2Models(token);
         await loadPublicManagementSettings(token);
+        await loadAdminLoginHistory(token);
         await loadMcpServers(token);
       } catch (err) {
         console.error('Failed to fetch data:', err);
@@ -2228,10 +2473,9 @@ export default function AdminPage() {
     setMcpStdioArgsInput(JSON.stringify(selectedMcpServer.config.args || []));
     setMcpStdioArgsError('');
 
-    const aiEnabled = selectedMcpServer.aiRouting?.enabled ?? false;
     const normalizedTools = normalizeAllowedTools(selectedMcpServer.aiRouting?.allowedTools);
     setMcpAiAllowedToolInput('');
-    setMcpAiAllowedToolsError(validateAllowedTools(normalizedTools, aiEnabled));
+    setMcpAiAllowedToolsError(validateAllowedTools(normalizedTools));
   }, [selectedMcpServer?.id]);
 
   const handleSave = async () => {
@@ -2278,7 +2522,8 @@ export default function AdminPage() {
         setMessage('保存しました');
         setTimeout(() => setMessage(''), 3000);
       } else {
-        setMessage('保存に失敗しました');
+        const error = await res.json().catch(() => null);
+        setMessage(error?.error || '保存に失敗しました');
       }
     } catch (err) {
       setMessage('エラーが発生しました');
@@ -2315,7 +2560,7 @@ export default function AdminPage() {
         const error = await res.json();
         setMessage(error.error || 'ドメイン追加に失敗しました');
       }
-    } catch (err) {
+    } catch {
       setMessage('ドメイン追加時にエラーが発生しました');
     }
   };
@@ -2348,7 +2593,7 @@ export default function AdminPage() {
         const error = await res.json();
         setMessage(error.error || 'ドメイン削除に失敗しました');
       }
-    } catch (err) {
+    } catch {
       setMessage('ドメイン削除時にエラーが発生しました');
     }
   };
@@ -2414,9 +2659,8 @@ export default function AdminPage() {
         const error = await res.json();
         setMessage(error.error || 'ナレッジ追加に失敗しました');
       }
-    } catch (err) {
+    } catch {
       setMessage('ナレッジ追加時にエラーが発生しました');
-      console.error(err);
     }
   };
 
@@ -2455,12 +2699,12 @@ export default function AdminPage() {
   };
 
   const handleCreatePronunciation = async () => {
-    const from = window.prompt('変換前の文字列（例: 小海町）を入力してください');
+    const from = window.prompt('変換前の文字列（例: Ark-i）を入力してください');
     if (!from || from.trim() === '') {
       return;
     }
 
-    const to = window.prompt('変換後の読み（例: コウミまち）を入力してください');
+    const to = window.prompt('変換後の読み（例: アークインジェクション）を入力してください');
     if (!to || to.trim() === '') {
       return;
     }
@@ -2698,7 +2942,7 @@ export default function AdminPage() {
       setSelectedChronicle(created);
       setMessage('CHRONICLEを追加しました');
       setTimeout(() => setMessage(''), 3000);
-    } catch (err) {
+    } catch {
       setChronicleError('CHRONICLE追加時にエラーが発生しました');
     } finally {
       setChronicleBusy(false);
@@ -2740,7 +2984,7 @@ export default function AdminPage() {
       setSelectedChronicle(updated);
       setMessage('CHRONICLEを保存しました');
       setTimeout(() => setMessage(''), 3000);
-    } catch (err) {
+    } catch {
       setChronicleError('CHRONICLE保存時にエラーが発生しました');
     } finally {
       setChronicleBusy(false);
@@ -2784,7 +3028,7 @@ export default function AdminPage() {
       setSelectedChronicle(next[0] || null);
       setMessage('CHRONICLEを削除しました');
       setTimeout(() => setMessage(''), 3000);
-    } catch (err) {
+    } catch {
       setChronicleError('CHRONICLE削除時にエラーが発生しました');
     } finally {
       setChronicleBusy(false);
@@ -2838,7 +3082,7 @@ export default function AdminPage() {
           : 'CHRONICLEを検出・登録しました'
       );
       setTimeout(() => setMessage(''), 3000);
-    } catch (err) {
+    } catch {
       setChronicleError('CHRONICLE検出時にエラーが発生しました');
     } finally {
       setChronicleBusy(false);
@@ -2875,11 +3119,104 @@ export default function AdminPage() {
 
       setMessage('フルバックアップを保存しました');
       setTimeout(() => setMessage(''), 3000);
-    } catch (err) {
-      console.error(err);
+    } catch {
       setMessage('バックアップ保存時にエラーが発生しました');
     } finally {
       setBackupBusy(false);
+    }
+  };
+
+  const handleDownloadSharedLogs = async () => {
+    if (!selectedDomain?.id) {
+      setMessage('保存対象のドメインが選択されていません');
+      setTimeout(() => setMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setSharedLogDownloadBusy(true);
+      setMessage('');
+      const token = localStorage.getItem('injection_token');
+      if (!token) {
+        setMessage('認証情報が見つかりません。再ログインしてください');
+        setTimeout(() => setMessage(''), 3000);
+        return;
+      }
+
+      const params = new URLSearchParams();
+      params.set('domainId', selectedDomain.id);
+      params.set('all', 'true');
+
+      const response = await fetch(`/api/domain-chat-history?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: 'no-store',
+      });
+
+      if (handleUnauthorizedResponse(response.status)) {
+        return;
+      }
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setMessage(payload?.error || '共有ログの保存に失敗しました');
+        setTimeout(() => setMessage(''), 3000);
+        return;
+      }
+
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      if (items.length === 0) {
+        setMessage('選択中ドメインに保存対象の共有ログがありません');
+        setTimeout(() => setMessage(''), 3000);
+        return;
+      }
+
+      const domainLabel = selectedDomain.name || selectedDomain.id;
+      const timestamp = createDownloadTimestamp();
+      const fileName = [
+        'arki-shared-logs',
+        sanitizeDownloadLabel(domainLabel),
+        'all-logs',
+        timestamp,
+      ]
+        .filter(Boolean)
+        .join('-');
+
+      const exportPayload = {
+        exportedAt: new Date().toISOString(),
+        filters: {
+          domainId: selectedDomain.id,
+          domainName: selectedDomain.name || null,
+          userId: null,
+          sessionId: null,
+          allLogsForSelectedDomain: true,
+          limit: null,
+          loadedCount: items.length,
+          totalCount: typeof payload?.totalCount === 'number' ? payload.totalCount : items.length,
+        },
+        items,
+      };
+
+      const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${fileName}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setMessage(`選択中ドメインの共有ログを ${items.length} 件保存しました`);
+      setTimeout(() => setMessage(''), 3000);
+    } catch (error) {
+      console.error('Shared log download error:', error);
+      setMessage('共有ログの保存時にエラーが発生しました');
+      setTimeout(() => setMessage(''), 3000);
+    } finally {
+      setSharedLogDownloadBusy(false);
     }
   };
 
@@ -3215,12 +3552,38 @@ export default function AdminPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
                 <h2>{selectedDomain.name}</h2>
               </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
+                {domainSubTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveDomainSubTab(tab.id)}
+                    style={{
+                      padding: '10px 14px',
+                      border: activeDomainSubTab === tab.id ? '1px solid #2563eb' : '1px solid #d1d5db',
+                      borderRadius: '8px',
+                      backgroundColor: activeDomainSubTab === tab.id ? '#eff6ff' : '#fff',
+                      color: activeDomainSubTab === tab.id ? '#1d4ed8' : '#374151',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      minWidth: '180px',
+                    }}
+                  >
+                    <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{tab.label}</div>
+                    <div style={{ fontSize: '12px', color: activeDomainSubTab === tab.id ? '#2563eb' : '#6b7280' }}>
+                      {tab.description}
+                    </div>
+                  </button>
+                ))}
+              </div>
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   handleSave();
                 }}
               >
+                {activeDomainSubTab === 'basic' && (
+                  <>
                 <div style={{ marginBottom: '15px' }}>
                   <label
                     style={{
@@ -3438,7 +3801,29 @@ export default function AdminPage() {
                     }}
                   />
                 </div>
+                <div style={{ marginBottom: '15px' }}>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                    キャッシュ有効期限（秒）
+                  </label>
+                  <input
+                    type="number"
+                    value={selectedDomain.ttl}
+                    onChange={(e) =>
+                      setSelectedDomain({ ...selectedDomain, ttl: parseInt(e.target.value) })
+                    }
+                    style={{
+                      width: '200px',
+                      padding: '8px',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                    }}
+                  />
+                </div>
+                  </>
+                )}
 
+                {activeDomainSubTab === 'prompt' && (
+                  <>
                 {showDomainSiteAnalysis && (
                 <div style={{ marginBottom: '15px', padding: '12px', border: '1px solid #c8e6c9', borderRadius: '6px', backgroundColor: '#f0fff0' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>サイト解析 → プロンプト自動生成</div>
@@ -3604,7 +3989,11 @@ export default function AdminPage() {
                     }}
                   />
                 </div>
+                  </>
+                )}
 
+                {activeDomainSubTab === 'experience' && (
+                  <>
                 <div style={{ marginBottom: '15px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px', backgroundColor: '#fafafa' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>クライアント アセット/TTS 上書き（ドメイン別）</div>
 
@@ -4240,7 +4629,11 @@ export default function AdminPage() {
                     空欄ならドメイン切替時に クライアントの既定設定へ戻します。
                   </div>
                 </div>
+                  </>
+                )}
 
+                {activeDomainSubTab === 'connections' && (
+                  <>
                 <div style={{ marginBottom: '15px' }}>
                   <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
                     組み合わせるナレッジ
@@ -4468,25 +4861,173 @@ export default function AdminPage() {
                   <summary style={{ fontWeight: 'bold', cursor: 'pointer' }}>合成結果プレビュー（保存後反映）</summary>
                   <div style={{ marginTop: '8px', fontSize: '12px', color: '#444', whiteSpace: 'pre-wrap' }}>{composedDomainText || '(空)'}</div>
                 </details>
+                  </>
+                )}
 
-                <div style={{ marginBottom: '15px' }}>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-                    キャッシュ有効期限（秒）
-                  </label>
-                  <input
-                    type="number"
-                    value={selectedDomain.ttl}
-                    onChange={(e) =>
-                      setSelectedDomain({ ...selectedDomain, ttl: parseInt(e.target.value) })
-                    }
+                {activeDomainSubTab === 'test' && (
+                  <>
+                <div style={{ marginBottom: '15px', padding: '14px', border: '1px solid #bfdbfe', borderRadius: '8px', backgroundColor: '#f8fbff' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '6px', color: '#1d4ed8' }}>管理画面内テストチャット</div>
+                  <div style={{ fontSize: '12px', color: '#475569', lineHeight: 1.6 }}>
+                    現在のドメイン設定をそのまま使って、公開せずに応答確認できます。まだ保存していないベースプロンプト、ナレッジ選択、MCP選択、CHRONICLE選択も次の送信から反映されます。
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '15px', border: '1px solid #ddd', borderRadius: '8px', backgroundColor: '#fff', overflow: 'hidden' }}>
+                  <div style={{ padding: '12px 14px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f8fafc', fontWeight: 'bold' }}>
+                    会話プレビュー
+                  </div>
+                  <div style={{ padding: '14px', display: 'grid', gap: '10px', minHeight: '220px', maxHeight: '420px', overflowY: 'auto' }}>
+                    {domainTestChatMessages.length === 0 ? (
+                      <div style={{ color: '#64748b', fontSize: '13px', lineHeight: 1.7 }}>
+                        まだ会話はありません。下の入力欄からテストメッセージを送ると、現在のドメイン構成で応答を確認できます。
+                      </div>
+                    ) : (
+                      domainTestChatMessages.map((message) => (
+                        <div
+                          key={message.id}
+                          style={{
+                            justifySelf: message.role === 'user' ? 'end' : 'start',
+                            maxWidth: '85%',
+                            padding: '12px 14px',
+                            borderRadius: '12px',
+                            backgroundColor: message.role === 'user' ? '#2563eb' : '#f3f4f6',
+                            color: message.role === 'user' ? '#fff' : '#111827',
+                            whiteSpace: 'pre-wrap',
+                            lineHeight: 1.7,
+                            boxShadow: '0 1px 2px rgba(15, 23, 42, 0.08)',
+                          }}
+                        >
+                          <div style={{ fontSize: '11px', opacity: 0.75, marginBottom: '6px' }}>
+                            {message.role === 'user' ? 'あなた' : '応答'} ・ {formatAdminTimestamp(message.createdAt)}
+                          </div>
+                          <div>{message.content}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '15px', display: 'grid', gap: '10px' }}>
+                  <textarea
+                    value={domainTestChatInput}
+                    onChange={(e) => setDomainTestChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                        e.preventDefault();
+                        void handleSendDomainTestChat();
+                      }
+                    }}
+                    rows={4}
+                    placeholder="例: このドメインで利用できる申請手続きを教えてください"
                     style={{
-                      width: '200px',
-                      padding: '8px',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
+                      width: '100%',
+                      padding: '12px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '8px',
+                      boxSizing: 'border-box',
+                      resize: 'vertical',
                     }}
                   />
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={handleSendDomainTestChat}
+                      disabled={domainTestChatBusy}
+                      style={{
+                        padding: '10px 16px',
+                        border: 'none',
+                        borderRadius: '6px',
+                        backgroundColor: domainTestChatBusy ? '#94a3b8' : '#2563eb',
+                        color: 'white',
+                        cursor: domainTestChatBusy ? 'default' : 'pointer',
+                        fontWeight: 'bold',
+                      }}
+                    >
+                      {domainTestChatBusy ? '送信中...' : 'テスト送信'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDomainTestChatMessages([]);
+                        setDomainTestChatError('');
+                        setDomainTestChatResult(null);
+                        domainTestChatSessionIdRef.current = selectedDomain ? createAdminPreviewSessionId(selectedDomain.id) : '';
+                      }}
+                      style={{
+                        padding: '10px 16px',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        backgroundColor: '#fff',
+                        color: '#111827',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      会話をクリア
+                    </button>
+                    <div style={{ alignSelf: 'center', fontSize: '12px', color: '#64748b' }}>
+                      Ctrl+Enter でも送信できます
+                    </div>
+                  </div>
+                  {domainTestChatError && (
+                    <div style={{ padding: '10px 12px', borderRadius: '6px', backgroundColor: '#fef2f2', color: '#b91c1c', fontSize: '13px' }}>
+                      {domainTestChatError}
+                    </div>
+                  )}
                 </div>
+
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  <div style={{ padding: '12px', border: '1px solid #e5e7eb', borderRadius: '8px', backgroundColor: '#fff' }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>実行サマリー</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px', fontSize: '13px', color: '#334155' }}>
+                      <div><strong>モデル:</strong> {domainTestChatResult?.modelName || runtimeModelInfo?.modelName || '未取得'}</div>
+                      <div><strong>backend:</strong> {domainTestChatResult?.backend || runtimeModelInfo?.backend || 'unknown'}</div>
+                      <div><strong>MCP:</strong> {domainTestChatResult?.intercept?.metadata?.mcpUsed ? '使用あり' : '未使用'}</div>
+                      <div><strong>CHRONICLE:</strong> {domainTestChatResult?.intercept?.metadata?.chronicleUsed ? '使用あり' : '未使用'}</div>
+                    </div>
+                    <div style={{ marginTop: '8px', fontSize: '12px', color: '#64748b' }}>
+                      requestId: {domainTestChatResult?.intercept?.metadata?.requestId || '-'}
+                    </div>
+                  </div>
+
+                  {(domainTestChatResult?.intercept?.metadata?.mcpUsed || domainTestChatResult?.intercept?.metadata?.mcpError || domainTestChatResult?.intercept?.dbResult) && (
+                    <div style={{ padding: '12px', border: '1px solid #e5e7eb', borderRadius: '8px', backgroundColor: '#fff' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>MCP デバッグ</div>
+                      <div style={{ display: 'grid', gap: '6px', fontSize: '13px', color: '#334155' }}>
+                        <div><strong>サーバー:</strong> {domainTestChatResult?.intercept?.metadata?.mcpServerId || '-'}</div>
+                        <div><strong>ツール:</strong> {domainTestChatResult?.intercept?.metadata?.mcpToolName || '-'}</div>
+                        {domainTestChatResult?.intercept?.dbResult?.summary && (
+                          <div><strong>概要:</strong> {domainTestChatResult.intercept.dbResult.summary}</div>
+                        )}
+                        {domainTestChatResult?.intercept?.metadata?.mcpError && (
+                          <div style={{ color: '#b91c1c' }}><strong>エラー:</strong> {domainTestChatResult.intercept.metadata.mcpError}</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {(domainTestChatResult?.intercept?.metadata?.chronicleUsed || domainTestChatResult?.intercept?.metadata?.chronicleError || domainTestChatResult?.intercept?.chronicle?.content) && (
+                    <div style={{ padding: '12px', border: '1px solid #e5e7eb', borderRadius: '8px', backgroundColor: '#fff' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>CHRONICLE デバッグ</div>
+                      <div style={{ display: 'grid', gap: '6px', fontSize: '13px', color: '#334155' }}>
+                        <div><strong>名称:</strong> {domainTestChatResult?.intercept?.metadata?.chronicleName || domainTestChatResult?.intercept?.chronicle?.sourceName || '-'}</div>
+                        {domainTestChatResult?.intercept?.metadata?.chronicleError && (
+                          <div style={{ color: '#b91c1c' }}><strong>エラー:</strong> {domainTestChatResult.intercept.metadata.chronicleError}</div>
+                        )}
+                        {domainTestChatResult?.intercept?.chronicle?.content && (
+                          <details style={{ marginTop: '4px' }}>
+                            <summary style={{ cursor: 'pointer', fontWeight: 'bold' }}>取得内容を見る</summary>
+                            <div style={{ marginTop: '8px', whiteSpace: 'pre-wrap', fontSize: '12px', lineHeight: 1.7, color: '#475569' }}>
+                              {domainTestChatResult.intercept.chronicle.content}
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                  </>
+                )}
               </form>
 
               {message && (
@@ -4626,6 +5167,23 @@ export default function AdminPage() {
                   {sharedLogsLoading ? '読込中...' : '再読込'}
                 </button>
 
+                <button
+                  type="button"
+                  onClick={handleDownloadSharedLogs}
+                  disabled={sharedLogDownloadBusy || !selectedDomain?.id}
+                  style={{
+                    padding: '10px 12px',
+                    backgroundColor: sharedLogDownloadBusy || !selectedDomain?.id ? '#ccc' : '#0f766e',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: sharedLogDownloadBusy || !selectedDomain?.id ? 'default' : 'pointer',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {sharedLogDownloadBusy ? '保存中...' : '選択ドメイン全件JSON保存'}
+                </button>
+
                 <div style={{ padding: '12px', backgroundColor: '#f8fafc', borderRadius: '6px', fontSize: '13px', lineHeight: 1.6 }}>
                   <div>取得件数: {sharedLogs.length} / {sharedLogsTotal}</div>
                   <div>対象: {effectiveSharedLogDomainId ? sharedLogEnabledDomains.find((domain) => domain.id === effectiveSharedLogDomainId)?.name || effectiveSharedLogDomainId : '全ドメイン'}</div>
@@ -4643,7 +5201,7 @@ export default function AdminPage() {
             <main>
                   <h2 style={{ marginTop: 0 }}>チャット履歴一覧</h2>
               <p style={{ color: '#555', marginTop: '0', marginBottom: '16px' }}>
-                    Amica の IndexedDB に保存している履歴と同じ内容を、新しい順で表示します。
+                  フロントアプリの IndexedDB に保存している履歴と同じ内容を、新しい順で表示します。
               </p>
 
               {sharedLogsError && (
@@ -4658,7 +5216,7 @@ export default function AdminPage() {
                 <div style={{ padding: '20px', backgroundColor: '#f8fafc', borderRadius: '8px' }}>該当するチャット履歴はありません。</div>
               ) : (
                 <div style={{ display: 'grid', gap: '12px' }}>
-                  {sharedLogs.map((log) => {
+                  {sortedSharedLogs.map((log) => {
                     const domain = domains.find((item) => item.id === log.domainId);
                     const isExpanded = expandedSharedLogId === log.historyId;
 
@@ -4680,7 +5238,7 @@ export default function AdminPage() {
                                 {domain?.name || log.domainId}
                               </span>
                               <span style={{ padding: '2px 8px', borderRadius: '9999px', backgroundColor: log.role === 'user' ? '#dcfce7' : log.role === 'assistant' ? '#ede9fe' : '#e5e7eb', color: log.role === 'user' ? '#166534' : log.role === 'assistant' ? '#6d28d9' : '#374151', fontSize: '12px', fontWeight: 600 }}>
-                                {log.role}
+                                {formatSharedLogRoleLabel(log.role)}
                               </span>
                               {log.mcpInfo?.used && (
                                 <span style={{ padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#ecfccb', color: '#3f6212', fontSize: '12px', fontWeight: 600 }}>
@@ -6183,6 +6741,106 @@ export default function AdminPage() {
               >
                 {savingPublicSettings ? '保存中...' : '公開管理を保存'}
               </button>
+
+              <div
+                style={{
+                  maxWidth: '720px',
+                  marginTop: '20px',
+                  padding: '16px',
+                  borderRadius: '10px',
+                  border: '1px solid #e5e7eb',
+                  backgroundColor: '#ffffff',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                  <div>
+                    <div style={{ fontWeight: 'bold', color: '#111827' }}>管理画面ログイン履歴</div>
+                    <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                      成功・失敗を含む最新100件のログイン履歴です。記録内容は IP と時刻です。
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const token = localStorage.getItem('injection_token');
+                      if (!token) {
+                        setMessage('認証情報が見つかりません。再ログインしてください');
+                        return;
+                      }
+                      void loadAdminLoginHistory(token);
+                    }}
+                    disabled={adminLoginHistoryLoading}
+                    style={{
+                      padding: '8px 14px',
+                      backgroundColor: adminLoginHistoryLoading ? '#e5e7eb' : '#f8fafc',
+                      color: '#334155',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '4px',
+                      cursor: adminLoginHistoryLoading ? 'default' : 'pointer',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    {adminLoginHistoryLoading ? '更新中...' : '履歴を更新'}
+                  </button>
+                </div>
+
+                {adminLoginHistoryError && (
+                  <div style={{ marginBottom: '12px', fontSize: '12px', color: '#b91c1c' }}>
+                    {adminLoginHistoryError}
+                  </div>
+                )}
+
+                {adminLoginHistoryLoading && adminLoginHistory.length === 0 ? (
+                  <div style={{ padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', color: '#64748b' }}>
+                    ログイン履歴を読み込み中です...
+                  </div>
+                ) : adminLoginHistory.length === 0 ? (
+                  <div style={{ padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', color: '#64748b' }}>
+                    まだログイン履歴がありません。
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#f8fafc', color: '#334155' }}>
+                          <th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #e5e7eb' }}>時刻</th>
+                          <th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #e5e7eb' }}>IP</th>
+                          <th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #e5e7eb' }}>結果</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminLoginHistory.map((entry, index) => (
+                          <tr key={`${entry.timestamp}-${entry.ip}-${index}`}>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9', color: '#111827' }}>
+                              {new Date(entry.timestamp).toLocaleString('ja-JP')}
+                            </td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9', color: '#111827', fontFamily: 'monospace' }}>
+                              {entry.ip}
+                            </td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  padding: '4px 10px',
+                                  borderRadius: '9999px',
+                                  fontWeight: 700,
+                                  fontSize: '12px',
+                                  backgroundColor: entry.success ? '#ecfdf5' : '#fef2f2',
+                                  color: entry.success ? '#065f46' : '#991b1b',
+                                  border: `1px solid ${entry.success ? '#6ee7b7' : '#fecaca'}`,
+                                }}
+                              >
+                                {entry.success ? '成功' : '失敗'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </main>
           </>
         ) : activeTab === 'mcp' ? (
@@ -6637,7 +7295,7 @@ export default function AdminPage() {
                         onChange={(e) => {
                           const nextEnabled = e.target.checked;
                           const currentAllowedTools = normalizeAllowedTools(selectedMcpServer.aiRouting?.allowedTools);
-                          setMcpAiAllowedToolsError(validateAllowedTools(currentAllowedTools, nextEnabled));
+                          setMcpAiAllowedToolsError(validateAllowedTools(currentAllowedTools));
 
                           setSelectedMcpServer({
                             ...selectedMcpServer,
@@ -6905,7 +7563,7 @@ export default function AdminPage() {
                                   const next = current.filter((_, idx) => idx !== index);
                                   const normalized = normalizeAllowedTools(next);
                                   setMcpAiAllowedToolsError(
-                                    validateAllowedTools(normalized, selectedMcpServer.aiRouting?.enabled ?? false)
+                                    validateAllowedTools(normalized)
                                   );
 
                                   setSelectedMcpServer({
@@ -6973,7 +7631,7 @@ export default function AdminPage() {
                               const next = [...current, candidate];
                               setMcpAiAllowedToolInput('');
                               setMcpAiAllowedToolsError(
-                                validateAllowedTools(next, selectedMcpServer.aiRouting?.enabled ?? false)
+                                validateAllowedTools(next)
                               );
                               setSelectedMcpServer({
                                 ...selectedMcpServer,
@@ -7017,7 +7675,7 @@ export default function AdminPage() {
                               const next = [...current, candidate];
                               setMcpAiAllowedToolInput('');
                               setMcpAiAllowedToolsError(
-                                validateAllowedTools(next, selectedMcpServer.aiRouting?.enabled ?? false)
+                                validateAllowedTools(next)
                               );
                               setSelectedMcpServer({
                                 ...selectedMcpServer,

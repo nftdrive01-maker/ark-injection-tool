@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { Dirent } from 'fs';
 import path from 'path';
 import fs from 'fs/promises';
 import { extractToken, verifyToken } from '@/lib/auth';
@@ -56,8 +57,8 @@ async function listAssets(type: AssetType) {
   const allowed = ALLOWED_EXTENSIONS[type];
 
   const [rootEntries, publicEntries] = await Promise.all([
-    fs.readdir(rootDir, { withFileTypes: true }).catch(() => [] as any[]),
-    fs.readdir(publicDir, { withFileTypes: true }).catch(() => [] as any[]),
+    fs.readdir(rootDir, { withFileTypes: true }).catch(() => [] as Dirent[]),
+    fs.readdir(publicDir, { withFileTypes: true }).catch(() => [] as Dirent[]),
   ]);
 
   const rootNameSet = new Set(
@@ -249,8 +250,8 @@ export async function DELETE(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, type, url }, { status: 200 });
-  } catch (err: any) {
-    if (err?.code === 'ENOENT') {
+  } catch (err: unknown) {
+    if (typeof err === 'object' && err && 'code' in err && err.code === 'ENOENT') {
       return NextResponse.json({ error: 'ファイルが見つかりません' }, { status: 404 });
     }
     console.error('Delete asset error:', err);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractToken, verifyToken } from '@/lib/auth';
+import { fetchStyleBertVits2Upstream } from '@/lib/stylebertvits2';
 
 function isAuthorized(req: NextRequest): boolean {
   const authHeader = req.headers.get('authorization');
@@ -26,18 +27,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'テキストが空です' }, { status: 400 });
     }
 
-    const baseUrl =
-      process.env.INJECTION_STYLEBERTVITS2_URL ||
-      process.env.STYLEBERTVITS2_URL ||
-      'http://127.0.0.1:5000';
-
     const params = new URLSearchParams({
       text,
       model_id: modelId,
       style,
     });
 
-    const upstream = await fetch(`${baseUrl.replace(/\/$/, '')}/voice?${params.toString()}`, {
+    const { response: upstream } = await fetchStyleBertVits2Upstream(`/voice?${params.toString()}`, {
       method: 'GET',
       cache: 'no-store',
     });

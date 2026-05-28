@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 
 export default function AppHeader() {
   const pathname = usePathname();
-  const showLogoutButton = pathname !== '/login';
+  const showLogoutButton = pathname !== '/' && pathname !== '/login';
 
   return (
     <header
@@ -36,9 +36,13 @@ export default function AppHeader() {
 
       {showLogoutButton ? (
         <button
-          onClick={() => {
-            localStorage.removeItem('injection_token');
-            window.location.href = '/login';
+          onClick={async () => {
+            try {
+              await fetch('/api/auth/logout', { method: 'POST' });
+            } finally {
+              localStorage.removeItem('injection_token');
+              window.location.href = '/login';
+            }
           }}
           style={{
             padding: '8px 14px',

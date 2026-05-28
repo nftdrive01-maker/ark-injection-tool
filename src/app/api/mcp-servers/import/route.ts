@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import {
+  type MCPAIRoutingConfig,
+  type MCPRoutingMode,
   createMCPServer,
   getAllMCPServers,
   updateMCPServer,
@@ -35,6 +37,25 @@ interface ServerMetadata {
 interface ImportRequest {
   mcp_server_url: string;
   name?: string;
+}
+
+function normalizeRoutingMode(mode: string | undefined): MCPRoutingMode {
+  return mode === 'rule' || mode === 'hybrid' ? mode : 'ai';
+}
+
+function normalizeAIRoutingProvider(provider: string | undefined): MCPAIRoutingConfig['provider'] {
+  return provider === 'openai' ? 'openai' : 'ollama';
+}
+
+function isTextContent(value: unknown): value is { type: 'text'; text: string } {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    'type' in value &&
+    'text' in value &&
+    value.type === 'text' &&
+    typeof value.text === 'string'
+  );
 }
 
 /**
@@ -89,11 +110,11 @@ export async function POST(request: NextRequest) {
       config: {
         url: body.mcp_server_url,
       },
-      mode: (metadata.defaultConfig.mode as any) || 'ai',
+      mode: normalizeRoutingMode(metadata.defaultConfig.mode),
       aiRouting: metadata.defaultConfig.aiRouting
         ? {
             enabled: true,
-            provider: metadata.defaultConfig.aiRouting.provider as any,
+        provider: normalizeAIRoutingProvider(metadata.defaultConfig.aiRouting.provider),
             model: metadata.defaultConfig.aiRouting.model || 'mistral',
             systemPrompt: metadata.defaultConfig.aiRouting.systemPrompt,
             temperature: metadata.defaultConfig.aiRouting.temperature,
@@ -124,13 +145,15 @@ export async function POST(request: NextRequest) {
           enabled: true,
           timeout: metadata.defaultConfig.timeout || 10000,
           config: { url: body.mcp_server_url },
-          mode: (metadata.defaultConfig.mode as any) || 'ai',          ruleRouting: {
+          mode: normalizeRoutingMode(metadata.defaultConfig.mode),
+          ruleRouting: {
             enabled: false,
             rules: [],
-          },          aiRouting: metadata.defaultConfig.aiRouting
+          },
+          aiRouting: metadata.defaultConfig.aiRouting
             ? {
                 enabled: true,
-                provider: metadata.defaultConfig.aiRouting.provider as any,
+                provider: normalizeAIRoutingProvider(metadata.defaultConfig.aiRouting.provider),
                 model: metadata.defaultConfig.aiRouting.model || existingServer.aiRouting?.model || 'mistral',
                 systemPrompt: metadata.defaultConfig.aiRouting.systemPrompt,
                 temperature: metadata.defaultConfig.aiRouting.temperature,
@@ -148,11 +171,11 @@ export async function POST(request: NextRequest) {
           enabled: true,
           timeout: metadata.defaultConfig.timeout || 10000,
           config: { url: body.mcp_server_url },
-          mode: (metadata.defaultConfig.mode as any) || 'ai',
+              mode: normalizeRoutingMode(metadata.defaultConfig.mode),
           aiRouting: metadata.defaultConfig.aiRouting
             ? {
                 enabled: true,
-                provider: metadata.defaultConfig.aiRouting.provider as any,
+                provider: normalizeAIRoutingProvider(metadata.defaultConfig.aiRouting.provider),
                 model: metadata.defaultConfig.aiRouting.model || 'mistral',
                 systemPrompt: metadata.defaultConfig.aiRouting.systemPrompt,
                 temperature: metadata.defaultConfig.aiRouting.temperature,
@@ -215,8 +238,8 @@ async function fetchMCPServerMetadata(url: string): Promise<ServerMetadata | nul
     }
 
     // ツールがテキスト形式で返した JSON をパース
-    const textContent = (result.content as any)[0];
-    if (typeof textContent !== 'object' || textContent.type !== 'text') {
+    const textContent = result.content[0];
+    if (!isTextContent(textContent)) {
       return null;
     }
 

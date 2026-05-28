@@ -38,9 +38,9 @@ function sanitizeId(value: string, fallback: string): string {
 function getDefaultRules(): PronunciationRule[] {
   return [
     {
-      id: 'koumi',
-      from: '小海町',
-      to: 'コウミまち',
+      id: 'ark_i',
+      from: 'Ark-i',
+      to: 'アークインジェクション',
       enabled: true,
       priority: 100,
       updatedAt: new Date().toISOString(),

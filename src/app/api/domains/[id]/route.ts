@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, extractToken } from '@/lib/auth';
-import { deleteDomain, getDomainById, updateDomain } from '@/lib/domains';
+import { deleteDomain, DUPLICATE_DOMAIN_NAME_ERROR, getDomainById, updateDomain } from '@/lib/domains';
 import { prepareDomainAccessUsersForSave } from '@/lib/domain-access-auth';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
@@ -56,6 +56,10 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     return NextResponse.json(updated, { status: 200 });
   } catch (err) {
+    if (err instanceof Error && err.message === DUPLICATE_DOMAIN_NAME_ERROR) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+
     console.error('Update domain error:', err);
     return NextResponse.json({ error: 'サーバーエラー' }, { status: 500 });
   }

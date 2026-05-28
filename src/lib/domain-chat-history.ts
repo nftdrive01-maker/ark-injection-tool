@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn } from 'child_process';
 import path from 'path';
 
 const DOMAIN_CHAT_HISTORY_DB_PATH =
@@ -100,6 +100,7 @@ export async function listDomainChatHistory(params?: {
   userId?: string;
   sessionId?: string;
   limit?: number;
+  all?: boolean;
 }): Promise<DomainChatHistoryListResult> {
   const dbFilePath = path.resolve(process.cwd(), DOMAIN_CHAT_HISTORY_DB_PATH);
   const stdout = await runNodeScript(
@@ -110,6 +111,7 @@ export async function listDomainChatHistory(params?: {
       userId: params?.userId,
       sessionId: params?.sessionId,
       limit: params?.limit,
+      all: params?.all === true,
     }),
   );
 

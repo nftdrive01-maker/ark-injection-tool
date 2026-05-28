@@ -44,10 +44,13 @@ export interface MemoryWithOnchainInfo extends BeyondCoreMemory {
   item_count?: number;
 }
 
-function normalizeMemory(raw: any): BeyondCoreMemory {
+type BeyondCoreMemoryLike = Partial<BeyondCoreMemory> & { is_active?: unknown };
+type BeyondCoreMemoryItem = NonNullable<BeyondCoreMemoryExport['items']>[number];
+
+function normalizeMemory(raw: BeyondCoreMemoryLike | null | undefined): BeyondCoreMemory {
   const activeValue = raw?.active ?? raw?.is_active;
   return {
-    id: raw?.id,
+    id: typeof raw?.id === 'string' || typeof raw?.id === 'number' ? raw.id : '',
     name: typeof raw?.name === 'string' ? raw.name : '',
     description: typeof raw?.description === 'string' ? raw.description : '',
     active: activeValue === true || activeValue === 1 || activeValue === '1',
@@ -62,7 +65,7 @@ function enrichMemoryWithOnchainInfo(raw: BeyondCoreMemoryExport): MemoryWithOnc
   
   // Get the highest block height from items
   const blockHeight = items.length > 0
-    ? Math.max(...items.map((item: any) => item?.block_height || 0).filter((h: number) => h > 0))
+    ? Math.max(...items.map((item: BeyondCoreMemoryItem) => item?.block_height || 0).filter((h: number) => h > 0))
     : undefined;
   
   // Get the first item's summary
@@ -128,7 +131,7 @@ async function fetchMemoriesFromChronicle(
 
     const memories = shouldExport
       ? rawMemories.map((item: unknown) => enrichMemoryWithOnchainInfo(item as BeyondCoreMemoryExport))
-      : rawMemories.map((item: unknown) => normalizeMemory(item));
+      : rawMemories.map((item: unknown) => normalizeMemory(item as BeyondCoreMemoryLike));
 
     return { ok: true, memories };
   } catch (err) {

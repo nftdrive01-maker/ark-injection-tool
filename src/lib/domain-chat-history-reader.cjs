@@ -33,6 +33,7 @@ async function main() {
   const domainId = typeof payload.domainId === 'string' ? payload.domainId.trim() : '';
   const userId = typeof payload.userId === 'string' ? payload.userId.trim() : '';
   const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
+  const all = payload.all === true;
   const limit = Number.isFinite(payload.limit) ? Math.max(1, Math.min(500, payload.limit)) : 100;
 
   if (!dbFilePath || !fs.existsSync(dbFilePath)) {
@@ -137,10 +138,9 @@ async function main() {
     const listStmt = db.prepare(
       `SELECT history_id, domain_id, user_id, role, content, created_at, created_at_day_key, session_id, db_result_json, mcp_info_json
        FROM domain_chat_history${whereClause}
-       ORDER BY created_at DESC
-       LIMIT ?`
+       ORDER BY created_at DESC${all ? '' : '\n       LIMIT ?'}`
     );
-    listStmt.bind([...whereValues, limit]);
+    listStmt.bind(all ? whereValues : [...whereValues, limit]);
 
     const items = [];
     while (listStmt.step()) {
@@ -160,7 +160,7 @@ async function main() {
     }
     listStmt.free();
 
-    process.stdout.write(JSON.stringify({ items, totalCount, limit, availableUserIds, availableSessionIds }));
+    process.stdout.write(JSON.stringify({ items, totalCount, limit: all ? totalCount : limit, availableUserIds, availableSessionIds }));
   } finally {
     db.close();
   }

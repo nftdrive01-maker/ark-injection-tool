@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'child_process';
 
 export interface CloudflareTunnelStatus {
   active: boolean;

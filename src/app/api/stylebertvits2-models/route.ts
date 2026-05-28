@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractToken, verifyToken } from '@/lib/auth';
+import { fetchStyleBertVits2Upstream } from '@/lib/stylebertvits2';
 
 type RawSbv2Model = {
   config_path?: string;
@@ -82,12 +83,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: '認証が必須です' }, { status: 401 });
     }
 
-    const baseUrl =
-      process.env.INJECTION_STYLEBERTVITS2_URL ||
-      process.env.STYLEBERTVITS2_URL ||
-      'http://127.0.0.1:5000';
-
-    const upstream = await fetch(`${baseUrl.replace(/\/$/, '')}/models/info`, {
+    const { response: upstream, sourceBaseUrl } = await fetchStyleBertVits2Upstream('/models/info', {
       method: 'GET',
       cache: 'no-store',
     });
@@ -96,7 +92,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         {
           models: [],
-          source: baseUrl,
+          source: sourceBaseUrl,
           error: `SBV2モデル一覧の取得に失敗しました (${upstream.status})`,
         },
         { status: 200 }
@@ -106,13 +102,13 @@ export async function GET(req: NextRequest) {
     const raw = await upstream.json();
     const models = toModelOptions(raw);
 
-    return NextResponse.json({ models, source: baseUrl }, { status: 200 });
+    return NextResponse.json({ models, source: sourceBaseUrl }, { status: 200 });
   } catch (err) {
     console.error('Style-Bert-VITS2 models API error:', err);
     return NextResponse.json(
       {
         models: [],
-        error: 'SBV2モデル一覧の取得中にエラーが発生しました',
+        error: err instanceof Error ? `SBV2モデル一覧の取得中にエラーが発生しました: ${err.message}` : 'SBV2モデル一覧の取得中にエラーが発生しました',
       },
       { status: 200 }
     );

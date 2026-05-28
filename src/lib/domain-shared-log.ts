@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn } from 'child_process';
 import path from 'path';
 
 const DOMAIN_SHARED_LOG_DB_PATH =

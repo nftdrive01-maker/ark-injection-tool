@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
     const userId = rawUserId.trim();
     const rawSessionId = req.nextUrl.searchParams.get('sessionId') || '';
     const sessionId = rawSessionId.trim();
+    const all = req.nextUrl.searchParams.get('all') === 'true';
     const rawLimit = parseInt(req.nextUrl.searchParams.get('limit') || '100', 10);
     const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(500, rawLimit)) : 100;
 
@@ -32,6 +33,7 @@ export async function GET(req: NextRequest) {
       userId: userId || undefined,
       sessionId: sessionId || undefined,
       limit,
+      all,
     });
 
     return NextResponse.json(
@@ -44,6 +46,7 @@ export async function GET(req: NextRequest) {
         domainId: domainId || null,
         userId: userId || null,
         sessionId: sessionId || null,
+        all,
       },
       { status: 200 },
     );

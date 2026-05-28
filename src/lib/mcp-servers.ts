@@ -236,7 +236,7 @@ function extractTextContent(callResult: unknown): string {
   return '';
 }
 
-function parseDbHubSearchOutput(output: string): any {
+function parseDbHubSearchOutput(output: string): unknown {
   try {
     return JSON.parse(output);
   } catch {
@@ -253,19 +253,34 @@ function parseDbHubSearchOutput(output: string): any {
   }
 }
 
+function getDbHubResults(payload: unknown): Array<{ name?: string; table?: string }> {
+  if (!payload || typeof payload !== 'object' || !('data' in payload)) {
+    return [];
+  }
+
+  const data = payload.data;
+  if (!data || typeof data !== 'object' || !('results' in data) || !Array.isArray(data.results)) {
+    return [];
+  }
+
+  return data.results as Array<{ name?: string; table?: string }>;
+}
+
 function buildDbHubExplorationSummary(tableOutput: string, columnOutput: string): string {
   const tablePayload = parseDbHubSearchOutput(tableOutput);
   const columnPayload = parseDbHubSearchOutput(columnOutput);
+  const tableResults = getDbHubResults(tablePayload);
+  const columnResults = getDbHubResults(columnPayload);
 
-  const tableNames = Array.isArray(tablePayload?.data?.results)
-    ? tablePayload.data.results
+  const tableNames = tableResults.length > 0
+    ? tableResults
         .map((item: { name?: string }) => (typeof item.name === 'string' ? item.name.trim() : ''))
         .filter((name: string) => name.length > 0)
     : [];
 
   const columnsByTable = new Map<string, string[]>();
-  if (Array.isArray(columnPayload?.data?.results)) {
-    for (const item of columnPayload.data.results as Array<{ table?: string; name?: string }>) {
+  if (columnResults.length > 0) {
+    for (const item of columnResults) {
       const table = typeof item.table === 'string' ? item.table.trim() : '';
       const column = typeof item.name === 'string' ? item.name.trim() : '';
       if (!table || !column) {

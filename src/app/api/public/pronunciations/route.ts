@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
         },
       }
     );
-  } catch (err) {
+  } catch {
     return NextResponse.json(
       {
         rules: [],
