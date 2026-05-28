@@ -21,6 +21,7 @@ interface Domain {
   imageAvatarIdleUrl?: string;
   imageAvatarTalkUrl?: string;
   imageAvatarTalkIntervalMs?: number;
+  ttsBackend?: string;
   ttsMuted?: boolean;
   gazeWakeEnabled?: boolean;
   gazeHoldMs?: number;
@@ -393,6 +394,7 @@ function normalizeAdminDomain(domain: Domain): Domain {
   return {
     ...domain,
     themeColor: typeof domain.themeColor === 'string' ? domain.themeColor : '',
+    ttsBackend: typeof domain.ttsBackend === 'string' ? domain.ttsBackend : '',
     accessControlEnabled: domain.accessControlEnabled === true,
     accessUsers: Array.isArray(domain.accessUsers)
       ? domain.accessUsers.map((user) => ({
@@ -470,6 +472,8 @@ export default function AdminPage() {
   const [sbv2TestText, setSbv2TestText] = useState('こんにちは、テスト音声です。');
   const [sbv2TestBusy, setSbv2TestBusy] = useState(false);
   const [sbv2TestError, setSbv2TestError] = useState('');
+  const [piperTestBusy, setPiperTestBusy] = useState(false);
+  const [piperTestError, setPiperTestError] = useState('');
   const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null);
   const [sessionStatusError, setSessionStatusError] = useState('');
   const [adminLoginHistory, setAdminLoginHistory] = useState<AdminLoginHistoryEntry[]>([]);
@@ -2178,6 +2182,74 @@ export default function AdminPage() {
       stopPreviewAudio();
     } finally {
       setSbv2TestBusy(false);
+    }
+  };
+
+  const handleTestPlayPiper = async () => {
+    if (!selectedDomain) {
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    const text = sbv2TestText.trim();
+    if (!text) {
+      setPiperTestError('テスト再生テキストを入力してください');
+      return;
+    }
+
+    try {
+      setPiperTestBusy(true);
+      setPiperTestError('');
+      stopPreviewAudio();
+
+      const response = await fetch('/api/piper-preview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        setPiperTestError(payload?.error || 'Piperテスト再生に失敗しました');
+        return;
+      }
+
+      const blob = await response.blob();
+      if (!blob.size) {
+        setPiperTestError('再生可能な音声データが返却されませんでした');
+        return;
+      }
+
+      const previewUrl = URL.createObjectURL(blob);
+      sbv2PreviewUrlRef.current = previewUrl;
+
+      const audio = new Audio(previewUrl);
+      sbv2PreviewAudioRef.current = audio;
+
+      audio.onended = () => {
+        stopPreviewAudio();
+      };
+
+      audio.onerror = () => {
+        setPiperTestError('音声の再生に失敗しました');
+        stopPreviewAudio();
+      };
+
+      await audio.play();
+    } catch (err) {
+      console.error('Failed to preview Piper voice:', err);
+      setPiperTestError('Piperテスト再生中にエラーが発生しました');
+      stopPreviewAudio();
+    } finally {
+      setPiperTestBusy(false);
     }
   };
 
@@ -4380,6 +4452,33 @@ export default function AdminPage() {
 
                   <div style={{ marginTop: '12px' }}>
                     <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      ドメイン別TTSバックエンド
+                    </label>
+                    <select
+                      value={selectedDomain.ttsBackend || ''}
+                      onChange={(e) =>
+                        setSelectedDomain({ ...selectedDomain, ttsBackend: e.target.value })
+                      }
+                      style={{
+                        width: '100%',
+                        padding: '8px',
+                        border: '1px solid #ddd',
+                        borderRadius: '4px',
+                        boxSizing: 'border-box',
+                        backgroundColor: 'white',
+                      }}
+                    >
+                      <option value="">未設定（グローバル設定を使用）</option>
+                      <option value="piper">Piper</option>
+                      <option value="stylebertvits2">Style-Bert-VITS2</option>
+                    </select>
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#666' }}>
+                      未設定ならグローバル TTS バックエンドを使用します。
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '12px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
                       TTS設定
                     </label>
                     <select
@@ -4605,6 +4704,21 @@ export default function AdminPage() {
                       </button>
                       <button
                         type="button"
+                        onClick={handleTestPlayPiper}
+                        disabled={piperTestBusy}
+                        style={{
+                          padding: '8px 12px',
+                          border: 'none',
+                          borderRadius: '4px',
+                          backgroundColor: piperTestBusy ? '#9ca3af' : '#0f766e',
+                          color: 'white',
+                          cursor: piperTestBusy ? 'default' : 'pointer',
+                        }}
+                      >
+                        {piperTestBusy ? 'Piper再生中...' : 'Piperで再生'}
+                      </button>
+                      <button
+                        type="button"
                         onClick={stopPreviewAudio}
                         style={{
                           padding: '8px 12px',
@@ -4621,6 +4735,11 @@ export default function AdminPage() {
                     {sbv2TestError && (
                       <div style={{ marginTop: '6px', fontSize: '12px', color: '#b91c1c' }}>
                         {sbv2TestError}
+                      </div>
+                    )}
+                    {piperTestError && (
+                      <div style={{ marginTop: '6px', fontSize: '12px', color: '#b91c1c' }}>
+                        {piperTestError}
                       </div>
                     )}
                   </div>

@@ -48,6 +48,7 @@ export interface Domain {
   characterName?: string;
   vrmEnabled?: boolean;
   vrmUrl?: string;
+  ttsBackend?: string;
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   ttsMuted?: boolean;
@@ -293,6 +294,7 @@ function migrateLegacyDomains(legacyDomains: Array<{
     mcpServerIds: [],
     chronicleIds: [],
     memoryIds: [],
+    ttsBackend: '',
     ttsMuted: undefined,
     version: domain.version || '1.0.0',
     ttl: domain.ttl || DEFAULT_TTL,
@@ -334,6 +336,7 @@ function getDefaultStore(): KnowledgeDomainStore {
       characterName: '',
       vrmEnabled: true,
       vrmUrl: '',
+      ttsBackend: '',
       stylebertvits2ModelId: '',
       stylebertvits2Style: '',
       ttsMuted: undefined,
@@ -596,6 +599,7 @@ export function createDomain(input: {
   imageAvatarIdleUrl?: string;
   imageAvatarTalkUrl?: string;
   imageAvatarTalkIntervalMs?: number;
+  ttsBackend?: string;
   ttsMuted?: boolean;
   gazeWakeEnabled?: boolean;
   gazeHoldMs?: number;
@@ -648,6 +652,7 @@ export function createDomain(input: {
     imageAvatarTalkUrl: input.imageAvatarTalkUrl || '',
     imageAvatarTalkIntervalMs:
       typeof input.imageAvatarTalkIntervalMs === 'number' ? input.imageAvatarTalkIntervalMs : 180,
+    ttsBackend: input.ttsBackend || '',
     ttsMuted: typeof input.ttsMuted === 'boolean' ? input.ttsMuted : undefined,
     gazeWakeEnabled: typeof input.gazeWakeEnabled === 'boolean' ? input.gazeWakeEnabled : true,
     gazeHoldMs:
@@ -717,6 +722,7 @@ export function getDomainOptions(): Array<{
   characterName?: string;
   vrmEnabled?: boolean;
   vrmUrl?: string;
+  ttsBackend?: string;
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   ttsMuted?: boolean;
@@ -745,6 +751,7 @@ export function getDomainOptions(): Array<{
     characterName: domain.characterName || '',
     vrmEnabled: domain.vrmEnabled ?? true,
     vrmUrl: domain.vrmUrl || '',
+    ttsBackend: domain.ttsBackend || '',
     stylebertvits2ModelId: domain.stylebertvits2ModelId || '',
     stylebertvits2Style: domain.stylebertvits2Style || '',
     ttsMuted: domain.ttsMuted,
@@ -961,8 +968,10 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
     characterName: typeof item.characterName === 'string' ? item.characterName : undefined,
     vrmEnabled: typeof item.vrmEnabled === 'boolean' ? item.vrmEnabled : undefined,
     vrmUrl: typeof item.vrmUrl === 'string' ? item.vrmUrl : undefined,
+    ttsBackend: typeof item.ttsBackend === 'string' ? item.ttsBackend : undefined,
     stylebertvits2ModelId: typeof item.stylebertvits2ModelId === 'string' ? item.stylebertvits2ModelId : undefined,
     stylebertvits2Style: typeof item.stylebertvits2Style === 'string' ? item.stylebertvits2Style : undefined,
+    ttsMuted: typeof item.ttsMuted === 'boolean' ? item.ttsMuted : undefined,
     imageAvatarIdleUrl: typeof item.imageAvatarIdleUrl === 'string' ? item.imageAvatarIdleUrl : undefined,
     imageAvatarTalkUrl: typeof item.imageAvatarTalkUrl === 'string' ? item.imageAvatarTalkUrl : undefined,
     imageAvatarTalkIntervalMs: typeof item.imageAvatarTalkIntervalMs === 'number' ? item.imageAvatarTalkIntervalMs : undefined,
