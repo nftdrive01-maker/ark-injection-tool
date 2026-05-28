@@ -96,11 +96,12 @@
         "fallbackTool": "crawl_site"
       },
       "createdAt": "2026-05-01T15:34:21.882Z",
-      "updatedAt": "2026-05-24T06:59:39.888Z",
-      "lastRuntimeSuccess": true,
-      "lastRuntimeAt": "2026-05-24T06:59:39.888Z",
+      "updatedAt": "2026-05-28T05:18:42.906Z",
+      "lastRuntimeSuccess": false,
+      "lastRuntimeAt": "2026-05-28T05:18:42.906Z",
       "isPreset": true,
-      "lastRuntimeToolName": "search_web"
+      "lastRuntimeError": "要求ツール 'calculate' はサーバー未実装です（available: fetch_url, crawl_site, search_web, search_files, read_file, search_content, list_directory, get_server_metadata）",
+      "lastRuntimeToolName": "calculate"
     },
     {
       "id": "google-workspace",

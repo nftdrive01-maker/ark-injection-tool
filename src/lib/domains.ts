@@ -52,6 +52,11 @@ export interface Domain {
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   ttsMuted?: boolean;
+  amicaLifeEnabled?: boolean;
+  timeBeforeIdleSec?: number;
+  minTimeIntervalSec?: number;
+  maxTimeIntervalSec?: number;
+  timeToSleepSec?: number;
   gazeWakeEnabled?: boolean;
   gazeHoldMs?: number;
   gazeReleaseMs?: number;
@@ -340,6 +345,11 @@ function getDefaultStore(): KnowledgeDomainStore {
       stylebertvits2ModelId: '',
       stylebertvits2Style: '',
       ttsMuted: undefined,
+      amicaLifeEnabled: undefined,
+      timeBeforeIdleSec: undefined,
+      minTimeIntervalSec: undefined,
+      maxTimeIntervalSec: undefined,
+      timeToSleepSec: undefined,
       knowledgeIds: [sanitizeId(DEFAULT_KNOWLEDGE_ID, 'default_knowledge')],
       mcpServerIds: [],
       chronicleIds: [],
@@ -601,6 +611,11 @@ export function createDomain(input: {
   imageAvatarTalkIntervalMs?: number;
   ttsBackend?: string;
   ttsMuted?: boolean;
+  amicaLifeEnabled?: boolean;
+  timeBeforeIdleSec?: number;
+  minTimeIntervalSec?: number;
+  maxTimeIntervalSec?: number;
+  timeToSleepSec?: number;
   gazeWakeEnabled?: boolean;
   gazeHoldMs?: number;
   gazeReleaseMs?: number;
@@ -654,6 +669,23 @@ export function createDomain(input: {
       typeof input.imageAvatarTalkIntervalMs === 'number' ? input.imageAvatarTalkIntervalMs : 180,
     ttsBackend: input.ttsBackend || '',
     ttsMuted: typeof input.ttsMuted === 'boolean' ? input.ttsMuted : undefined,
+    amicaLifeEnabled: typeof input.amicaLifeEnabled === 'boolean' ? input.amicaLifeEnabled : undefined,
+    timeBeforeIdleSec:
+      typeof input.timeBeforeIdleSec === 'number' && input.timeBeforeIdleSec > 0
+        ? Math.floor(input.timeBeforeIdleSec)
+        : undefined,
+    minTimeIntervalSec:
+      typeof input.minTimeIntervalSec === 'number' && input.minTimeIntervalSec > 0
+        ? Math.floor(input.minTimeIntervalSec)
+        : undefined,
+    maxTimeIntervalSec:
+      typeof input.maxTimeIntervalSec === 'number' && input.maxTimeIntervalSec > 0
+        ? Math.floor(input.maxTimeIntervalSec)
+        : undefined,
+    timeToSleepSec:
+      typeof input.timeToSleepSec === 'number' && input.timeToSleepSec > 0
+        ? Math.floor(input.timeToSleepSec)
+        : undefined,
     gazeWakeEnabled: typeof input.gazeWakeEnabled === 'boolean' ? input.gazeWakeEnabled : true,
     gazeHoldMs:
       typeof input.gazeHoldMs === 'number' && input.gazeHoldMs > 0
@@ -726,6 +758,11 @@ export function getDomainOptions(): Array<{
   stylebertvits2ModelId?: string;
   stylebertvits2Style?: string;
   ttsMuted?: boolean;
+  amicaLifeEnabled?: boolean;
+  timeBeforeIdleSec?: number;
+  minTimeIntervalSec?: number;
+  maxTimeIntervalSec?: number;
+  timeToSleepSec?: number;
   gazeWakeEnabled?: boolean;
   gazeHoldMs?: number;
   gazeReleaseMs?: number;
@@ -755,6 +792,23 @@ export function getDomainOptions(): Array<{
     stylebertvits2ModelId: domain.stylebertvits2ModelId || '',
     stylebertvits2Style: domain.stylebertvits2Style || '',
     ttsMuted: domain.ttsMuted,
+    amicaLifeEnabled: typeof domain.amicaLifeEnabled === 'boolean' ? domain.amicaLifeEnabled : undefined,
+    timeBeforeIdleSec:
+      typeof domain.timeBeforeIdleSec === 'number' && domain.timeBeforeIdleSec > 0
+        ? domain.timeBeforeIdleSec
+        : undefined,
+    minTimeIntervalSec:
+      typeof domain.minTimeIntervalSec === 'number' && domain.minTimeIntervalSec > 0
+        ? domain.minTimeIntervalSec
+        : undefined,
+    maxTimeIntervalSec:
+      typeof domain.maxTimeIntervalSec === 'number' && domain.maxTimeIntervalSec > 0
+        ? domain.maxTimeIntervalSec
+        : undefined,
+    timeToSleepSec:
+      typeof domain.timeToSleepSec === 'number' && domain.timeToSleepSec > 0
+        ? domain.timeToSleepSec
+        : undefined,
     gazeWakeEnabled: domain.gazeWakeEnabled ?? true,
     gazeHoldMs:
       typeof domain.gazeHoldMs === 'number' && domain.gazeHoldMs > 0
@@ -972,6 +1026,11 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
     stylebertvits2ModelId: typeof item.stylebertvits2ModelId === 'string' ? item.stylebertvits2ModelId : undefined,
     stylebertvits2Style: typeof item.stylebertvits2Style === 'string' ? item.stylebertvits2Style : undefined,
     ttsMuted: typeof item.ttsMuted === 'boolean' ? item.ttsMuted : undefined,
+    amicaLifeEnabled: typeof item.amicaLifeEnabled === 'boolean' ? item.amicaLifeEnabled : undefined,
+    timeBeforeIdleSec: typeof item.timeBeforeIdleSec === 'number' ? item.timeBeforeIdleSec : undefined,
+    minTimeIntervalSec: typeof item.minTimeIntervalSec === 'number' ? item.minTimeIntervalSec : undefined,
+    maxTimeIntervalSec: typeof item.maxTimeIntervalSec === 'number' ? item.maxTimeIntervalSec : undefined,
+    timeToSleepSec: typeof item.timeToSleepSec === 'number' ? item.timeToSleepSec : undefined,
     imageAvatarIdleUrl: typeof item.imageAvatarIdleUrl === 'string' ? item.imageAvatarIdleUrl : undefined,
     imageAvatarTalkUrl: typeof item.imageAvatarTalkUrl === 'string' ? item.imageAvatarTalkUrl : undefined,
     imageAvatarTalkIntervalMs: typeof item.imageAvatarTalkIntervalMs === 'number' ? item.imageAvatarTalkIntervalMs : undefined,

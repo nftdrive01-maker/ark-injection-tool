@@ -23,6 +23,11 @@ interface Domain {
   imageAvatarTalkIntervalMs?: number;
   ttsBackend?: string;
   ttsMuted?: boolean;
+  amicaLifeEnabled?: boolean;
+  timeBeforeIdleSec?: number;
+  minTimeIntervalSec?: number;
+  maxTimeIntervalSec?: number;
+  timeToSleepSec?: number;
   gazeWakeEnabled?: boolean;
   gazeHoldMs?: number;
   gazeReleaseMs?: number;
@@ -4505,6 +4510,116 @@ export default function AdminPage() {
                     </select>
                     <div style={{ marginTop: '6px', fontSize: '12px', color: '#666' }}>
                       未設定なら現在のグローバル TTS 設定をそのまま使います。
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '16px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px', backgroundColor: '#fff' }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>自発会話（ドメイン別）</div>
+
+                    <div style={{ marginBottom: '12px' }}>
+                      <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                        自発会話の有効化
+                      </label>
+                      <select
+                        value={selectedDomain.amicaLifeEnabled === true ? 'true' : selectedDomain.amicaLifeEnabled === false ? 'false' : ''}
+                        onChange={(e) => {
+                          const nextValue = e.target.value;
+                          setSelectedDomain({
+                            ...selectedDomain,
+                            amicaLifeEnabled: nextValue === '' ? undefined : nextValue === 'true',
+                          });
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          boxSizing: 'border-box',
+                          backgroundColor: 'white',
+                        }}
+                      >
+                        <option value="">未設定（グローバル設定を使用）</option>
+                        <option value="true">ON</option>
+                        <option value="false">OFF</option>
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>アイドル判定時間（秒）</label>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={selectedDomain.timeBeforeIdleSec ?? ''}
+                          onChange={(e) =>
+                            setSelectedDomain({
+                              ...selectedDomain,
+                              timeBeforeIdleSec: e.target.value === '' ? undefined : Math.max(1, parseInt(e.target.value, 10)),
+                            })
+                          }
+                          placeholder="未設定（グローバル設定を使用）"
+                          style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>スリープ時間（秒）</label>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={selectedDomain.timeToSleepSec ?? ''}
+                          onChange={(e) =>
+                            setSelectedDomain({
+                              ...selectedDomain,
+                              timeToSleepSec: e.target.value === '' ? undefined : Math.max(1, parseInt(e.target.value, 10)),
+                            })
+                          }
+                          placeholder="未設定（グローバル設定を使用）"
+                          style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>最小発話間隔（秒）</label>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={selectedDomain.minTimeIntervalSec ?? ''}
+                          onChange={(e) =>
+                            setSelectedDomain({
+                              ...selectedDomain,
+                              minTimeIntervalSec: e.target.value === '' ? undefined : Math.max(1, parseInt(e.target.value, 10)),
+                            })
+                          }
+                          placeholder="未設定（グローバル設定を使用）"
+                          style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>最大発話間隔（秒）</label>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={selectedDomain.maxTimeIntervalSec ?? ''}
+                          onChange={(e) =>
+                            setSelectedDomain({
+                              ...selectedDomain,
+                              maxTimeIntervalSec: e.target.value === '' ? undefined : Math.max(1, parseInt(e.target.value, 10)),
+                            })
+                          }
+                          placeholder="未設定（グローバル設定を使用）"
+                          style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#666' }}>
+                      未設定なら現在のグローバル Amica Life 設定をそのまま使います。
                     </div>
                   </div>
 
