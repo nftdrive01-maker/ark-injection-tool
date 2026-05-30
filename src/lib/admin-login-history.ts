@@ -76,3 +76,14 @@ export function readAdminLoginHistory(limit = 100): AdminLoginHistoryRecord[] {
     return [];
   }
 }
+
+export function clearAdminLoginHistory(): void {
+  try {
+    const fullPath = path.resolve(process.cwd(), ADMIN_LOGIN_HISTORY_LOG_PATH);
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath);
+    }
+  } catch {
+    // Keep admin UI responsive even if log cleanup fails.
+  }
+}

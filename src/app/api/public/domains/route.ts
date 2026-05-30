@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
         knowledgeIds: Array.isArray(d.knowledgeIds) ? d.knowledgeIds : [],
         vrmUrl: toAbsoluteAssetUrl(d.vrmUrl, origin),
         bgUrl: toAbsoluteAssetUrl(d.bgUrl, origin),
+        headerImageUrl: toAbsoluteAssetUrl(d.headerImageUrl, origin),
         imageAvatarIdleUrl: toAbsoluteAssetUrl(d.imageAvatarIdleUrl, origin),
         imageAvatarTalkUrl: toAbsoluteAssetUrl(d.imageAvatarTalkUrl, origin),
       }));

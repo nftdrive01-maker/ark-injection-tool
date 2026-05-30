@@ -14,6 +14,7 @@ interface Domain {
   baseSystemPrompt: string;
   baseContext: string;
   bgUrl?: string;
+  headerImageUrl?: string;
   themeColor?: string;
   characterName?: string;
   vrmEnabled?: boolean;
@@ -207,6 +208,7 @@ interface PublicManagementSettings {
   maxConcurrentSessions: number;
   chatRequestsPerUserPerMinute: number;
   ttsRequestsPerUserPerMinute: number;
+  launcherEnabled: boolean;
 }
 
 interface CloudflareTunnelStatus {
@@ -398,6 +400,8 @@ function sanitizeDownloadLabel(value: string): string {
 function normalizeAdminDomain(domain: Domain): Domain {
   return {
     ...domain,
+    bgUrl: typeof domain.bgUrl === 'string' ? domain.bgUrl : '',
+    headerImageUrl: typeof domain.headerImageUrl === 'string' ? domain.headerImageUrl : '',
     themeColor: typeof domain.themeColor === 'string' ? domain.themeColor : '',
     ttsBackend: typeof domain.ttsBackend === 'string' ? domain.ttsBackend : '',
     accessControlEnabled: domain.accessControlEnabled === true,
@@ -457,6 +461,7 @@ export default function AdminPage() {
   const [sharedLogsTotal, setSharedLogsTotal] = useState(0);
   const [sharedLogsLimit, setSharedLogsLimit] = useState(50);
   const [sharedLogDownloadBusy, setSharedLogDownloadBusy] = useState(false);
+  const [clearingSharedLogs, setClearingSharedLogs] = useState(false);
   const [sharedLogFilterDomainId, setSharedLogFilterDomainId] = useState('');
   const [sharedLogFilterUserId, setSharedLogFilterUserId] = useState(SHARED_LOG_ALL_USERS);
   const [sharedLogAvailableUserIds, setSharedLogAvailableUserIds] = useState<string[]>([]);
@@ -484,10 +489,12 @@ export default function AdminPage() {
   const [adminLoginHistory, setAdminLoginHistory] = useState<AdminLoginHistoryEntry[]>([]);
   const [adminLoginHistoryLoading, setAdminLoginHistoryLoading] = useState(false);
   const [adminLoginHistoryError, setAdminLoginHistoryError] = useState('');
+  const [clearingAdminLoginHistory, setClearingAdminLoginHistory] = useState(false);
   const [publicSettings, setPublicSettings] = useState<PublicManagementSettings>({
     maxConcurrentSessions: 0,
     chatRequestsPerUserPerMinute: 0,
     ttsRequestsPerUserPerMinute: 0,
+    launcherEnabled: true,
   });
   const [savingPublicSettings, setSavingPublicSettings] = useState(false);
   const [cloudflareTunnelStatus, setCloudflareTunnelStatus] = useState<CloudflareTunnelStatus | null>(null);
@@ -1174,6 +1181,10 @@ export default function AdminPage() {
           typeof payload?.ttsRequestsPerUserPerMinute === 'number' && Number.isFinite(payload.ttsRequestsPerUserPerMinute)
             ? Math.max(0, Math.floor(payload.ttsRequestsPerUserPerMinute))
             : 0,
+        launcherEnabled:
+          typeof payload?.launcherEnabled === 'boolean'
+            ? payload.launcherEnabled
+            : true,
       });
     } catch (err) {
       console.error('Failed to load public management settings:', err);
@@ -1846,6 +1857,7 @@ export default function AdminPage() {
           maxConcurrentSessions: Math.max(0, Math.floor(publicSettings.maxConcurrentSessions || 0)),
           chatRequestsPerUserPerMinute: Math.max(0, Math.floor(publicSettings.chatRequestsPerUserPerMinute || 0)),
           ttsRequestsPerUserPerMinute: Math.max(0, Math.floor(publicSettings.ttsRequestsPerUserPerMinute || 0)),
+          launcherEnabled: publicSettings.launcherEnabled,
         }),
       });
 
@@ -1869,6 +1881,10 @@ export default function AdminPage() {
           typeof payload?.ttsRequestsPerUserPerMinute === 'number'
             ? Math.max(0, Math.floor(payload.ttsRequestsPerUserPerMinute))
             : 0,
+        launcherEnabled:
+          typeof payload?.launcherEnabled === 'boolean'
+            ? payload.launcherEnabled
+            : true,
       });
       setMessage('公開管理設定を保存しました');
     } catch {
@@ -3297,6 +3313,84 @@ export default function AdminPage() {
     }
   };
 
+  const handleClearSharedLogs = async () => {
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    if (!window.confirm('共有ログを初期化します。よろしいですか？')) {
+      return;
+    }
+
+    try {
+      setClearingSharedLogs(true);
+
+      const response = await fetch('/api/domain-shared-logs', {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setMessage(payload?.error || '共有ログの初期化に失敗しました');
+        return;
+      }
+
+      setSharedLogs([]);
+      setSharedLogsTotal(0);
+      setSharedLogsError('');
+      setSharedLogAvailableUserIds([]);
+      setSharedLogAvailableSessionIds([]);
+      setExpandedSharedLogId(null);
+      setMessage('共有ログを初期化しました');
+    } catch {
+      setMessage('共有ログの初期化中にエラーが発生しました');
+    } finally {
+      setClearingSharedLogs(false);
+    }
+  };
+
+  const handleClearAdminLoginHistory = async () => {
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    if (!window.confirm('管理画面ログイン履歴を初期化します。よろしいですか？')) {
+      return;
+    }
+
+    try {
+      setClearingAdminLoginHistory(true);
+
+      const response = await fetch('/api/admin-login-history', {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setMessage(payload?.error || 'ログイン履歴の初期化に失敗しました');
+        return;
+      }
+
+      setAdminLoginHistory([]);
+      setAdminLoginHistoryError('');
+      setMessage('管理画面ログイン履歴を初期化しました');
+    } catch {
+      setMessage('ログイン履歴の初期化中にエラーが発生しました');
+    } finally {
+      setClearingAdminLoginHistory(false);
+    }
+  };
+
   const handleImportBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -4185,6 +4279,53 @@ export default function AdminPage() {
                             </option>
                           ))}
                         </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                        ランチャー用ヘッダー画像 URL
+                      </label>
+                      <input
+                        type="text"
+                        value={selectedDomain.headerImageUrl || ''}
+                        onChange={(e) =>
+                          setSelectedDomain({ ...selectedDomain, headerImageUrl: e.target.value })
+                        }
+                        placeholder="空欄なら背景画像または既定ヘッダーを使用"
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+
+                      <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
+                        <select
+                          value={selectedDomain.headerImageUrl || ''}
+                          onChange={(e) =>
+                            setSelectedDomain({ ...selectedDomain, headerImageUrl: e.target.value })
+                          }
+                          style={{
+                            flex: 1,
+                            padding: '8px',
+                            border: '1px solid #ddd',
+                            borderRadius: '4px',
+                            backgroundColor: 'white',
+                          }}
+                        >
+                          <option value="">アップロード済み背景から選択</option>
+                          {bgImageAssets.map((asset) => (
+                            <option key={asset.url} value={asset.url}>
+                              {asset.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div style={{ marginTop: '6px', fontSize: '12px', color: '#666' }}>
+                        Amica ランチャーのドメインカード上部に表示されます。
                       </div>
                     </div>
                   </div>
@@ -5416,6 +5557,23 @@ export default function AdminPage() {
                   }}
                 >
                   {sharedLogDownloadBusy ? '保存中...' : '選択ドメイン全件JSON保存'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearSharedLogs}
+                  disabled={sharedLogsLoading || clearingSharedLogs}
+                  style={{
+                    padding: '10px 12px',
+                    backgroundColor: sharedLogsLoading || clearingSharedLogs ? '#ccc' : '#dc2626',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: sharedLogsLoading || clearingSharedLogs ? 'default' : 'pointer',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {clearingSharedLogs ? '初期化中...' : '共有ログを初期化'}
                 </button>
 
                 <div style={{ padding: '12px', backgroundColor: '#f8fafc', borderRadius: '6px', fontSize: '13px', lineHeight: 1.6 }}>
@@ -6664,6 +6822,28 @@ export default function AdminPage() {
 
               <div style={{ maxWidth: '520px', marginBottom: '16px' }}>
                 <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                  起動時のランチャー表示
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#111827' }}>
+                  <input
+                    type="checkbox"
+                    checked={publicSettings.launcherEnabled}
+                    onChange={(e) =>
+                      setPublicSettings({
+                        ...publicSettings,
+                        launcherEnabled: e.target.checked,
+                      })
+                    }
+                  />
+                  ドメインランチャーを表示する
+                </label>
+                <div style={{ marginTop: '6px', fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
+                  オフにすると、Amica はトップ表示から直接チャットへ入ります。反映は Amica の再読込時です。
+                </div>
+              </div>
+
+              <div style={{ maxWidth: '520px', marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
                   同時接続数の上限（全ドメイン共通）
                 </label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -7003,18 +7183,34 @@ export default function AdminPage() {
                       }
                       void loadAdminLoginHistory(token);
                     }}
-                    disabled={adminLoginHistoryLoading}
+                    disabled={adminLoginHistoryLoading || clearingAdminLoginHistory}
                     style={{
                       padding: '8px 14px',
-                      backgroundColor: adminLoginHistoryLoading ? '#e5e7eb' : '#f8fafc',
+                      backgroundColor: adminLoginHistoryLoading || clearingAdminLoginHistory ? '#e5e7eb' : '#f8fafc',
                       color: '#334155',
                       border: '1px solid #cbd5e1',
                       borderRadius: '4px',
-                      cursor: adminLoginHistoryLoading ? 'default' : 'pointer',
+                      cursor: adminLoginHistoryLoading || clearingAdminLoginHistory ? 'default' : 'pointer',
                       fontWeight: 'bold',
                     }}
                   >
                     {adminLoginHistoryLoading ? '更新中...' : '履歴を更新'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearAdminLoginHistory}
+                    disabled={adminLoginHistoryLoading || clearingAdminLoginHistory}
+                    style={{
+                      padding: '8px 14px',
+                      backgroundColor: adminLoginHistoryLoading || clearingAdminLoginHistory ? '#fca5a5' : '#dc2626',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: adminLoginHistoryLoading || clearingAdminLoginHistory ? 'default' : 'pointer',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    {clearingAdminLoginHistory ? '初期化中...' : '履歴を初期化'}
                   </button>
                 </div>
 

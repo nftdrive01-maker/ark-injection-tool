@@ -1,5 +1,6 @@
 {
   "maxConcurrentSessions": 4,
   "chatRequestsPerUserPerMinute": 10,
-  "ttsRequestsPerUserPerMinute": 60
+  "ttsRequestsPerUserPerMinute": 60,
+  "launcherEnabled": true
 }

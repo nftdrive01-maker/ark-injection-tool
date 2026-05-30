@@ -44,6 +44,7 @@ export interface Domain {
   baseSystemPrompt: string;
   baseContext: string;
   bgUrl?: string;
+  headerImageUrl?: string;
   themeColor?: string;
   characterName?: string;
   vrmEnabled?: boolean;
@@ -295,6 +296,7 @@ function migrateLegacyDomains(legacyDomains: Array<{
     enabled: true,
     baseSystemPrompt: '',
     baseContext: '',
+    headerImageUrl: '',
     knowledgeIds: [`${domain.id}_knowledge`],
     mcpServerIds: [],
     chronicleIds: [],
@@ -337,6 +339,7 @@ function getDefaultStore(): KnowledgeDomainStore {
       baseSystemPrompt: DEFAULT_DOMAIN_BASE_SYSTEM_PROMPT,
       baseContext: DEFAULT_DOMAIN_BASE_CONTEXT,
       bgUrl: '',
+      headerImageUrl: '',
       themeColor: '',
       characterName: '',
       vrmEnabled: true,
@@ -602,6 +605,7 @@ export function createDomain(input: {
   baseSystemPrompt?: string;
   baseContext?: string;
   bgUrl?: string;
+  headerImageUrl?: string;
   themeColor?: string;
   characterName?: string;
   vrmEnabled?: boolean;
@@ -659,6 +663,7 @@ export function createDomain(input: {
     baseSystemPrompt: input.baseSystemPrompt || '',
     baseContext: input.baseContext || '',
     bgUrl: input.bgUrl || '',
+    headerImageUrl: input.headerImageUrl || '',
     themeColor: sanitizeThemeColor(input.themeColor),
     characterName: input.characterName || '',
     vrmEnabled: input.vrmEnabled ?? true,
@@ -744,12 +749,14 @@ export function deleteDomain(id: string): boolean {
 export function getDomainOptions(): Array<{
   id: string;
   name: string;
+  description?: string;
   enabled?: boolean;
   sharedLogEnabled?: boolean;
   accessControlEnabled?: boolean;
   knowledgeIds?: string[];
   mcpServerIds?: string[];
   bgUrl?: string;
+  headerImageUrl?: string;
   themeColor?: string;
   characterName?: string;
   vrmEnabled?: boolean;
@@ -778,12 +785,14 @@ export function getDomainOptions(): Array<{
   return store.domains.map((domain) => ({
     id: domain.id,
     name: domain.name,
+    description: domain.description || '',
     enabled: domain.enabled ?? true,
     sharedLogEnabled: domain.sharedLogEnabled ?? false,
     accessControlEnabled: domain.accessControlEnabled === true,
     knowledgeIds: Array.isArray(domain.knowledgeIds) ? domain.knowledgeIds : [],
     mcpServerIds: Array.isArray(domain.mcpServerIds) ? domain.mcpServerIds : [],
     bgUrl: domain.bgUrl || '',
+    headerImageUrl: domain.headerImageUrl || '',
     themeColor: sanitizeThemeColor(domain.themeColor),
     characterName: domain.characterName || '',
     vrmEnabled: domain.vrmEnabled ?? true,
@@ -1018,6 +1027,7 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
     baseSystemPrompt: typeof item.baseSystemPrompt === 'string' ? item.baseSystemPrompt : '',
     baseContext: typeof item.baseContext === 'string' ? item.baseContext : '',
     bgUrl: typeof item.bgUrl === 'string' ? item.bgUrl : undefined,
+    headerImageUrl: typeof item.headerImageUrl === 'string' ? item.headerImageUrl : undefined,
     themeColor: sanitizeThemeColor(item.themeColor),
     characterName: typeof item.characterName === 'string' ? item.characterName : undefined,
     vrmEnabled: typeof item.vrmEnabled === 'boolean' ? item.vrmEnabled : undefined,

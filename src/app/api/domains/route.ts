@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
       baseSystemPrompt: body.baseSystemPrompt,
       baseContext: body.baseContext,
       bgUrl: body.bgUrl,
+      headerImageUrl: body.headerImageUrl,
       themeColor: body.themeColor,
       characterName: body.characterName,
       vrmEnabled: body.vrmEnabled,

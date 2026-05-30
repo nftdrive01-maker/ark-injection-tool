@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractToken, verifyToken } from '@/lib/auth';
-import { listDomainSharedLogs } from '@/lib/domain-shared-log';
+import { clearDomainSharedLogs, listDomainSharedLogs } from '@/lib/domain-shared-log';
 
 function isAuthorized(req: NextRequest): boolean {
   const authHeader = req.headers.get('authorization');
@@ -43,5 +43,19 @@ export async function GET(req: NextRequest) {
       { logs: [], total: 0, limit: 100, error: '共有ログの取得に失敗しました' },
       { status: 500 },
     );
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: '認証が必須です' }, { status: 401 });
+  }
+
+  try {
+    await clearDomainSharedLogs();
+    return NextResponse.json({ ok: true }, { status: 200 });
+  } catch (error) {
+    console.error('Clear domain shared logs error:', error);
+    return NextResponse.json({ error: '共有ログの初期化に失敗しました' }, { status: 500 });
   }
 }

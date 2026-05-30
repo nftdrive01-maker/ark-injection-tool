@@ -5,6 +5,7 @@ export interface PublicManagementSettings {
   maxConcurrentSessions: number;
   chatRequestsPerUserPerMinute: number;
   ttsRequestsPerUserPerMinute: number;
+  launcherEnabled: boolean;
 }
 
 type PublicManagementSettingsInput = Partial<PublicManagementSettings> & {
@@ -23,6 +24,7 @@ const DEFAULT_SETTINGS: PublicManagementSettings = {
   maxConcurrentSessions: 0,
   chatRequestsPerUserPerMinute: 0,
   ttsRequestsPerUserPerMinute: 0,
+  launcherEnabled: true,
 };
 
 function normalize(input: PublicManagementSettingsInput | null | undefined): PublicManagementSettings {
@@ -46,11 +48,18 @@ function normalize(input: PublicManagementSettingsInput | null | undefined): Pub
   const ttsRequestsPerUserPerMinute = Number.isFinite(rawTtsRequestsPerUserPerMinute)
     ? Math.max(0, Math.floor(rawTtsRequestsPerUserPerMinute))
     : DEFAULT_SETTINGS.ttsRequestsPerUserPerMinute;
+  const launcherEnabled =
+    typeof input?.launcherEnabled === 'boolean'
+      ? input.launcherEnabled
+      : typeof input?.launcherEnabled === 'string'
+        ? input.launcherEnabled !== 'false'
+        : DEFAULT_SETTINGS.launcherEnabled;
 
   return {
     maxConcurrentSessions,
     chatRequestsPerUserPerMinute,
     ttsRequestsPerUserPerMinute,
+    launcherEnabled,
   };
 }
 

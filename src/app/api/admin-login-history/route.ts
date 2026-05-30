@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractToken, verifyToken } from '@/lib/auth';
-import { readAdminLoginHistory } from '@/lib/admin-login-history';
+import { clearAdminLoginHistory, readAdminLoginHistory } from '@/lib/admin-login-history';
 
 function isAuthorized(req: NextRequest): boolean {
   const authHeader = req.headers.get('authorization');
@@ -21,4 +21,13 @@ export async function GET(req: NextRequest) {
   const limit = Number.isFinite(limitParam) ? Math.min(Math.max(Math.trunc(limitParam), 1), 500) : 100;
   const items = readAdminLoginHistory(limit);
   return NextResponse.json({ items });
+}
+
+export async function DELETE(req: NextRequest) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  clearAdminLoginHistory();
+  return NextResponse.json({ ok: true });
 }

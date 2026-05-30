@@ -96,12 +96,11 @@
         "fallbackTool": "crawl_site"
       },
       "createdAt": "2026-05-01T15:34:21.882Z",
-      "updatedAt": "2026-05-28T05:18:42.906Z",
+      "updatedAt": "2026-05-30T06:59:15.686Z",
       "lastRuntimeSuccess": false,
-      "lastRuntimeAt": "2026-05-28T05:18:42.906Z",
+      "lastRuntimeAt": "2026-05-30T06:59:15.686Z",
       "isPreset": true,
-      "lastRuntimeError": "要求ツール 'calculate' はサーバー未実装です（available: fetch_url, crawl_site, search_web, search_files, read_file, search_content, list_directory, get_server_metadata）",
-      "lastRuntimeToolName": "calculate"
+      "lastRuntimeError": "INJECTION_OPENAI_API_KEY is not set"
     },
     {
       "id": "google-workspace",

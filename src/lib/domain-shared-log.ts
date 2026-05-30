@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 
 const DOMAIN_SHARED_LOG_DB_PATH =
@@ -111,4 +112,15 @@ export async function listDomainSharedLogs(params?: {
     total: typeof payload.total === 'number' ? payload.total : 0,
     limit: typeof payload.limit === 'number' ? payload.limit : params?.limit || 100,
   };
+}
+
+export async function clearDomainSharedLogs(): Promise<void> {
+  const dbFilePath = path.resolve(process.cwd(), DOMAIN_SHARED_LOG_DB_PATH);
+  try {
+    if (fs.existsSync(dbFilePath)) {
+      fs.unlinkSync(dbFilePath);
+    }
+  } catch (error) {
+    throw error;
+  }
 }
