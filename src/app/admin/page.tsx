@@ -209,6 +209,8 @@ interface PublicManagementSettings {
   chatRequestsPerUserPerMinute: number;
   ttsRequestsPerUserPerMinute: number;
   launcherEnabled: boolean;
+  termsOfUseUrl: string;
+  privacyPolicyUrl: string;
 }
 
 interface CloudflareTunnelStatus {
@@ -495,6 +497,8 @@ export default function AdminPage() {
     chatRequestsPerUserPerMinute: 0,
     ttsRequestsPerUserPerMinute: 0,
     launcherEnabled: true,
+    termsOfUseUrl: '',
+    privacyPolicyUrl: '',
   });
   const [savingPublicSettings, setSavingPublicSettings] = useState(false);
   const [cloudflareTunnelStatus, setCloudflareTunnelStatus] = useState<CloudflareTunnelStatus | null>(null);
@@ -1185,6 +1189,14 @@ export default function AdminPage() {
           typeof payload?.launcherEnabled === 'boolean'
             ? payload.launcherEnabled
             : true,
+        termsOfUseUrl:
+          typeof payload?.termsOfUseUrl === 'string'
+            ? payload.termsOfUseUrl.trim()
+            : '',
+        privacyPolicyUrl:
+          typeof payload?.privacyPolicyUrl === 'string'
+            ? payload.privacyPolicyUrl.trim()
+            : '',
       });
     } catch (err) {
       console.error('Failed to load public management settings:', err);
@@ -1858,6 +1870,8 @@ export default function AdminPage() {
           chatRequestsPerUserPerMinute: Math.max(0, Math.floor(publicSettings.chatRequestsPerUserPerMinute || 0)),
           ttsRequestsPerUserPerMinute: Math.max(0, Math.floor(publicSettings.ttsRequestsPerUserPerMinute || 0)),
           launcherEnabled: publicSettings.launcherEnabled,
+          termsOfUseUrl: publicSettings.termsOfUseUrl.trim(),
+          privacyPolicyUrl: publicSettings.privacyPolicyUrl.trim(),
         }),
       });
 
@@ -1885,6 +1899,14 @@ export default function AdminPage() {
           typeof payload?.launcherEnabled === 'boolean'
             ? payload.launcherEnabled
             : true,
+        termsOfUseUrl:
+          typeof payload?.termsOfUseUrl === 'string'
+            ? payload.termsOfUseUrl.trim()
+            : '',
+        privacyPolicyUrl:
+          typeof payload?.privacyPolicyUrl === 'string'
+            ? payload.privacyPolicyUrl.trim()
+            : '',
       });
       setMessage('公開管理設定を保存しました');
     } catch {
@@ -5769,6 +5791,32 @@ export default function AdminPage() {
                     handleSaveKnowledge();
                   }}
                 >
+                  <div style={{ marginBottom: '12px', padding: '16px', border: '1px solid #c7d2fe', borderRadius: '8px', backgroundColor: '#f5f7ff' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                      <div>
+                        <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>会話からナレッジ / ドメイン生成</div>
+                        <div style={{ fontSize: '13px', color: '#475569', lineHeight: 1.7, maxWidth: '680px' }}>
+                          会話ログ取込、テンプレート選択、プレビュー編集、保存までを専用ページに分離しました。ナレッジ管理画面では一覧編集に集中し、生成ワークフローは専用画面で扱えます。
+                        </div>
+                      </div>
+
+                      <a
+                        href="/admin/conversation-generator"
+                        style={{
+                          textDecoration: 'none',
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          backgroundColor: '#4f46e5',
+                          color: '#fff',
+                          fontWeight: 700,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        専用ページを開く
+                      </a>
+                    </div>
+                  </div>
+
                   <div style={{ marginBottom: '12px', padding: '12px', border: '1px solid #b3e5fc', borderRadius: '6px', backgroundColor: '#f3fbff' }}>
                     <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>サイト解析 → ナレッジ作成/再取得更新</div>
 
@@ -6839,6 +6887,62 @@ export default function AdminPage() {
                 </label>
                 <div style={{ marginTop: '6px', fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
                   オフにすると、Amica はトップ表示から直接チャットへ入ります。反映は Amica の再読込時です。
+                </div>
+              </div>
+
+              <div style={{ maxWidth: '720px', marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                  利用規約 URL
+                </label>
+                <input
+                  type="url"
+                  value={publicSettings.termsOfUseUrl}
+                  onChange={(e) =>
+                    setPublicSettings({
+                      ...publicSettings,
+                      termsOfUseUrl: e.target.value,
+                    })
+                  }
+                  placeholder="https://example.com/terms"
+                  style={{
+                    width: '100%',
+                    maxWidth: '520px',
+                    padding: '8px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <div style={{ marginTop: '6px', fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
+                  Amica のインフォメーションモーダルで「利用規約」を押した際に開く URL です。未設定の場合はボタンが無効になります。
+                </div>
+              </div>
+
+              <div style={{ maxWidth: '720px', marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                  プライバシーポリシー URL
+                </label>
+                <input
+                  type="url"
+                  value={publicSettings.privacyPolicyUrl}
+                  onChange={(e) =>
+                    setPublicSettings({
+                      ...publicSettings,
+                      privacyPolicyUrl: e.target.value,
+                    })
+                  }
+                  placeholder="https://example.com/privacy"
+                  style={{
+                    width: '100%',
+                    maxWidth: '520px',
+                    padding: '8px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <div style={{ marginTop: '6px', fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
+                  Amica のインフォメーションモーダルで「プライバシー」を押した際に開く URL です。未設定の場合はボタンが無効になります。
                 </div>
               </div>
 

@@ -19,6 +19,8 @@ export async function GET() {
   return NextResponse.json(
     {
       launcherEnabled: settings.launcherEnabled,
+      termsOfUseUrl: settings.termsOfUseUrl,
+      privacyPolicyUrl: settings.privacyPolicyUrl,
     },
     { status: 200, headers: CORS_HEADERS },
   );

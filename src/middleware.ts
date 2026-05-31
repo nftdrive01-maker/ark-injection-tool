@@ -11,7 +11,7 @@ import {
 import { verifyTokenEdge } from '@/lib/auth-edge';
 
 function isProtectedPagePath(pathname: string): boolean {
-  return pathname === '/admin' || pathname.startsWith('/admin/');
+  return pathname === '/admin' || pathname.startsWith('/admin/') || pathname === '/help' || pathname.startsWith('/help/');
 }
 
 function isLoginPath(pathname: string): boolean {
@@ -93,5 +93,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/login', '/api/:path*'],
+  matcher: ['/admin/:path*', '/help/:path*', '/login', '/api/:path*'],
 };

@@ -1,4 +1,4 @@
-# DB-MCP 日本語指示サンプル
+cloudflared tunnel --url http://localhost:3000cloudflared tunnel --url http://localhost:3000# DB-MCP 日本語指示サンプル
 
 DB-mcp に対して、データベース検索や構造確認を依頼するときの日本語テンプレート集です。
 

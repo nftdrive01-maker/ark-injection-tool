@@ -60,19 +60,35 @@ export default function Home() {
 
         <div style={{ marginTop: '26px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           {isLoggedIn ? (
-            <a
-              href="/admin"
-              style={{
-                textDecoration: 'none',
-                padding: '10px 16px',
-                borderRadius: '8px',
-                backgroundColor: '#2563eb',
-                color: '#fff',
-                fontWeight: 700,
-              }}
-            >
-              管理画面へ
-            </a>
+            <>
+              <a
+                href="/admin"
+                style={{
+                  textDecoration: 'none',
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  backgroundColor: '#2563eb',
+                  color: '#fff',
+                  fontWeight: 700,
+                }}
+              >
+                管理画面へ
+              </a>
+              <a
+                href="/help"
+                style={{
+                  textDecoration: 'none',
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  backgroundColor: '#eff6ff',
+                  color: '#1d4ed8',
+                  border: '1px solid #bfdbfe',
+                  fontWeight: 700,
+                }}
+              >
+                ヘルプを見る
+              </a>
+            </>
           ) : (
             <a
               href="/login"

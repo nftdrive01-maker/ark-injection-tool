@@ -52,6 +52,8 @@ export async function PUT(req: NextRequest) {
       chatRequestsPerUserPerMinute: body?.chatRequestsPerUserPerMinute,
       ttsRequestsPerUserPerMinute: body?.ttsRequestsPerUserPerMinute,
       launcherEnabled: body?.launcherEnabled,
+      termsOfUseUrl: body?.termsOfUseUrl,
+      privacyPolicyUrl: body?.privacyPolicyUrl,
     });
 
     return NextResponse.json(

@@ -41,3 +41,10 @@ Thumbs.db
 
 # Data
 /data/domains.json
+/data/admin-login-history.jsonl
+/data/mcp-audit.jsonl
+/data/domain-chat-history.sqlite
+/data/domain-shared-logs.sqlite
+
+# Local asset staging
+/vrm/
