@@ -2,12 +2,19 @@
 
 クライアント連携向けの**動的知識注入ツール**。外部ソースからリアルタイムに最新情報を読み込み、AIの回答精度を高める補助ツール。
 
+公開リポジトリ: https://github.com/nftdrive01-maker/ark-injection-tool
+
+このリポジトリの既定運用ブランチは `main` です。
+
 ## 概要
 
 - **独立停止可能**: クライアント本体の安定性に影響なし
 - **マルチドメイン対応**: 複数の知識ソースを ドメイン別に管理・切替
 - **ハイブリッドキャッシュ**: クライアント側でオフライン時フォールバック対応
 - **fail-open設計**: API障害時も クライアント は通常稼働
+- **公開管理対応**: 公開設定 API と管理 UI で外部公開条件を制御可能
+- **ヘルプ閲覧**: `/help` で Ark-i 関連ドキュメントを参照可能
+- **会話から生成**: `/admin/conversation-generator` から会話履歴ベースで Knowledge / ドメイン下書きを生成可能
 
 ## クイックスタート
 
@@ -34,6 +41,14 @@ npm run dev
 # http://localhost:4001 で起動
 ```
 
+GitHub から clone する場合:
+
+```bash
+git clone https://github.com/nftdrive01-maker/ark-injection-tool.git
+cd ark-injection-tool
+npm install
+```
+
 ### 4. ログイン
 
 ブラウザで `http://localhost:4001/login` にアクセス。  
@@ -43,6 +58,12 @@ npm run dev
 
 `/admin` から複数ドメイン（専門相談、施設案内、緊急告知など）を管理。  
 各ドメイン内でシステムプロンプトとコンテキストを更新可能。
+
+追加機能:
+
+- `/admin/conversation-generator`: 会話履歴から Knowledge / ドメイン案を preview / save
+- `/help`: Ark-i ドキュメントの検索・閲覧
+- 公開設定: `/api/public-management` と `/api/public/settings` で公開状態を取得・更新
 
 ## API エンドポイント
 
@@ -152,6 +173,17 @@ INJECTION_TOOL_INTERNAL_URL=http://localhost:4001
 ### CORS
 
 同一マシン localhost のみ許可。別ホスト接続時は設定変更が必要。
+
+### 実行時データ
+
+以下の実行時データは公開リポジトリに含めない前提です。
+
+- `data/admin-login-history.jsonl`
+- `data/mcp-audit.jsonl`
+- `data/domain-chat-history.sqlite`
+- `data/domain-shared-logs.sqlite`
+
+これらは `.gitignore` で除外し、ローカル運用時のみ保持します。
 
 ## トラブルシューティング
 
