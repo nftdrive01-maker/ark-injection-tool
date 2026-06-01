@@ -59,6 +59,10 @@ npm install
 `/admin` から複数ドメイン（専門相談、施設案内、緊急告知など）を管理。  
 各ドメイン内でシステムプロンプトとコンテキストを更新可能。
 
+### 6. 発話辞書
+
+既定の発話辞書は `data/pronunciations.json` にあり、公開リポジトリの追跡対象です。発話辞書の更新手順、ローカル専用差し替え、公開時の注意は [PRONUNCIATION_DICTIONARY_MANUAL_JA.md](./PRONUNCIATION_DICTIONARY_MANUAL_JA.md) を参照してください。
+
 追加機能:
 
 - `/admin/conversation-generator`: 会話履歴から Knowledge / ドメイン案を preview / save
