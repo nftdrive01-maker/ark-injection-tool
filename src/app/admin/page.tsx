@@ -6651,6 +6651,24 @@ export default function AdminPage() {
 
             <main>
               <h2 style={{ marginTop: 0 }}>発音辞書管理</h2>
+              <div
+                style={{
+                  marginBottom: '16px',
+                  padding: '12px',
+                  border: '1px solid #bfdbfe',
+                  borderRadius: '6px',
+                  backgroundColor: '#eff6ff',
+                  color: '#1e3a8a',
+                  fontSize: '12px',
+                  lineHeight: 1.6,
+                }}
+              >
+                <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>この辞書は公開既定値です</div>
+                <div>
+                  ここで更新した内容は既定の発話辞書ファイルに保存されます。公開用の既定辞書として反映したい変更だけを保存し、ローカル専用にしたい場合は
+                  INJECTION_PRONUNCIATIONS_CONFIG を別ファイルへ向けて運用してください。
+                </div>
+              </div>
               <div style={{ marginBottom: '16px', padding: '12px', border: '1px solid #ddd', borderRadius: '6px', backgroundColor: '#fafafa' }}>
                 <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>発音辞書設定</div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
