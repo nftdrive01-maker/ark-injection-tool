@@ -427,29 +427,6 @@ function createDefaultRuleRouting(): MCPRuleRoutingConfig {
         toolName: 'search_web',
         argsTemplate: { query: '{{query}}' },
       },
-      {
-        id: 'time_default',
-        enabled: true,
-        priority: 100,
-        keywords: ['時刻', '時間', '何時', 'current time', 'time now'],
-        toolName: 'get_current_time',
-      },
-      {
-        id: 'weather_default',
-        enabled: true,
-        priority: 90,
-        keywords: ['天気', 'weather'],
-        toolName: 'get_mock_weather',
-        argsTemplate: { city: '{{city}}' },
-      },
-      {
-        id: 'calc_default',
-        enabled: true,
-        priority: 80,
-        keywords: ['計算', 'calculate', 'calc', '式'],
-        toolName: 'calculate',
-        argsTemplate: { expression: '{{expression}}' },
-      },
     ],
   };
 }
@@ -463,8 +440,8 @@ function createDefaultAIRouting(): MCPAIRoutingConfig {
     temperature: 0.1,
     maxTokens: 240,
     confidenceThreshold: 0.55,
-    allowedTools: ['search_web', 'web_search', 'search', 'get_current_time', 'get_mock_weather', 'calculate', 'list_tools_info', 'echo'],
-    fallbackTool: 'get_current_time',
+    allowedTools: ['fetch_url', 'crawl_site', 'search_web', 'search_files', 'read_file', 'search_content', 'list_directory', 'get_server_metadata', 'web_search', 'search'],
+    fallbackTool: 'search_web',
   };
 }
 

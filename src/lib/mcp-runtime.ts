@@ -831,32 +831,35 @@ function createDbHubFallbackDecision(userText: string, availableTools: string[])
   return null;
 }
 
-function createFallbackDecision(userText: string): ToolDecision {
+function createFallbackDecision(userText: string, availableTools: string[]): ToolDecision | null {
   if (/(検索|調べて|search|lookup|find)/i.test(userText)) {
-    return { name: 'search_web', args: { query: extractSearchQuery(userText) } };
+    return resolveExecutableTool('search_web', { query: extractSearchQuery(userText) }, availableTools, userText)
+      || resolveExecutableTool('fetch_url', { query: extractSearchQuery(userText) }, availableTools, userText);
   }
 
   if (/(天気|weather)/i.test(userText)) {
-    return { name: 'get_mock_weather', args: { city: pickWeatherCity(userText) } };
+    return resolveExecutableTool('get_mock_weather', { city: pickWeatherCity(userText) }, availableTools, userText);
   }
 
   if (/(計算|calculate|calc|式)/i.test(userText)) {
-    return { name: 'calculate', args: { expression: extractExpression(userText) || '0 + 0' } };
+    return resolveExecutableTool('calculate', { expression: extractExpression(userText) || '0 + 0' }, availableTools, userText);
   }
 
   if (/(ツール一覧|使えるツール|list tools|tools list)/i.test(userText)) {
-    return { name: 'list_tools_info', args: {} };
+    return resolveExecutableTool('list_tools_info', {}, availableTools, userText);
   }
 
   if (/(echo|オウム返し)/i.test(userText)) {
-    return { name: 'echo', args: { message: userText.slice(0, 200) } };
+    return resolveExecutableTool('echo', { message: userText.slice(0, 200) }, availableTools, userText);
   }
 
   if (/(時刻|時間|何時|current time|time now)/i.test(userText)) {
-    return { name: 'get_current_time', args: {} };
+    return resolveExecutableTool('get_current_time', {}, availableTools, userText);
   }
 
-  return { name: MCP_DEFAULT_TOOL, args: {} };
+  return resolveExecutableTool(MCP_DEFAULT_TOOL, {}, availableTools, userText)
+    || resolveExecutableTool('search_web', { query: extractSearchQuery(userText) }, availableTools, userText)
+    || resolveExecutableTool('fetch_url', { query: extractSearchQuery(userText) }, availableTools, userText);
 }
 
 function normalizeToolArguments(toolName: string, args: Record<string, unknown>, userText: string): Record<string, unknown> {
@@ -1445,11 +1448,11 @@ async function pickToolAndArgs(
     : null;
 
   if (mode === 'rule') {
-    return resolveRuleDecision(server, userText) || dbHubFallback || (MCP_ALWAYS_ON ? createFallbackDecision(userText) : null);
+    return resolveRuleDecision(server, userText) || dbHubFallback || (MCP_ALWAYS_ON ? createFallbackDecision(userText, availableTools) : null);
   }
 
   if (mode === 'ai') {
-    return (await resolveAIDecision(server, userText, availableTools, explorationSummary)) || dbHubFallback || (MCP_ALWAYS_ON ? createFallbackDecision(userText) : null);
+    return (await resolveAIDecision(server, userText, availableTools, explorationSummary)) || dbHubFallback || (MCP_ALWAYS_ON ? createFallbackDecision(userText, availableTools) : null);
   }
 
   const byRule = resolveRuleDecision(server, userText);
@@ -1457,7 +1460,7 @@ async function pickToolAndArgs(
     return byRule;
   }
 
-  return (await resolveAIDecision(server, userText, availableTools, explorationSummary)) || dbHubFallback || (MCP_ALWAYS_ON ? createFallbackDecision(userText) : null);
+  return (await resolveAIDecision(server, userText, availableTools, explorationSummary)) || dbHubFallback || (MCP_ALWAYS_ON ? createFallbackDecision(userText, availableTools) : null);
 }
 
 function extractTextContent(callResult: unknown): string {

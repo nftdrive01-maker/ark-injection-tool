@@ -30,47 +30,6 @@
             "argsTemplate": {
               "query": "{{query}}"
             }
-          },
-          {
-            "id": "calc_default",
-            "enabled": true,
-            "priority": 80,
-            "keywords": [
-              "計算",
-              "calculate",
-              "calc",
-              "式"
-            ],
-            "toolName": "calculate",
-            "argsTemplate": {
-              "expression": "{{expression}}"
-            }
-          },
-          {
-            "id": "time_default",
-            "enabled": true,
-            "priority": 100,
-            "keywords": [
-              "時刻",
-              "時間",
-              "何時",
-              "current time",
-              "time now"
-            ],
-            "toolName": "get_current_time"
-          },
-          {
-            "id": "weather_default",
-            "enabled": true,
-            "priority": 90,
-            "keywords": [
-              "天気",
-              "weather"
-            ],
-            "toolName": "get_mock_weather",
-            "argsTemplate": {
-              "city": "{{city}}"
-            }
           }
         ]
       },
@@ -89,18 +48,20 @@
           "read_file",
           "search_content",
           "list_directory",
+          "get_server_metadata",
           "crawl_site",
           "web_search",
           "search"
         ],
-        "fallbackTool": "crawl_site"
+        "fallbackTool": "search_web"
       },
       "createdAt": "2026-05-01T15:34:21.882Z",
-      "updatedAt": "2026-05-31T23:18:36.169Z",
+      "updatedAt": "2026-06-01T23:12:21.432Z",
       "lastRuntimeSuccess": false,
-      "lastRuntimeAt": "2026-05-31T23:18:36.169Z",
+      "lastRuntimeAt": "2026-06-01T23:12:21.432Z",
       "isPreset": true,
-      "lastRuntimeError": "INJECTION_OPENAI_API_KEY is not set"
+      "lastRuntimeError": "要求ツール 'calculate' はサーバー未実装です（available: fetch_url, crawl_site, search_web, search_files, read_file, search_content, list_directory, get_server_metadata）",
+      "lastRuntimeToolName": "calculate"
     },
     {
       "id": "google-workspace",

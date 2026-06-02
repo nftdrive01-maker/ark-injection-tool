@@ -7433,11 +7433,12 @@ export default function AdminPage() {
                               enabled: true,
                               rules: [
                                 {
-                                  id: 'time_default',
+                                  id: 'search_default',
                                   enabled: true,
-                                  priority: 100,
-                                  keywords: ['時刻', '時間', '何時', 'current time'],
-                                  toolName: 'get_current_time',
+                                  priority: 110,
+                                  keywords: ['検索', '調べて', '探して', 'search', 'lookup', 'find'],
+                                  toolName: 'search_web',
+                                  argsTemplate: { query: '{{query}}' },
                                 },
                               ],
                             },
@@ -7450,8 +7451,8 @@ export default function AdminPage() {
                               temperature: 0.1,
                               maxTokens: 240,
                               confidenceThreshold: 0.55,
-                              allowedTools: ['get_current_time', 'get_mock_weather', 'calculate', 'list_tools_info', 'echo'],
-                              fallbackTool: 'get_current_time',
+                              allowedTools: ['fetch_url', 'crawl_site', 'search_web', 'search_files', 'read_file', 'search_content', 'list_directory', 'get_server_metadata', 'web_search', 'search'],
+                              fallbackTool: 'search_web',
                             },
                           }),
                         });
