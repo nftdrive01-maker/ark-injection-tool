@@ -48,3 +48,6 @@ Thumbs.db
 
 # Local asset staging
 /vrm/
+/bgimage/
+/public/vrm/
+/public/bgimage/

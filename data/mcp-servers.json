@@ -2,14 +2,14 @@
   "servers": [
     {
       "id": "mcp",
-      "name": "mcp-server (WEB検索)",
+      "name": "WEB検索",
       "description": "ウェブサイトとファイルの検索・取得機能を提供するMCPサーバー",
       "transport": "sse",
       "config": {
         "url": "http://localhost:8000/sse"
       },
       "enabled": true,
-      "timeout": 30000,
+      "timeout": 15000,
       "mode": "hybrid",
       "ruleRouting": {
         "enabled": true,
@@ -19,12 +19,32 @@
             "enabled": true,
             "priority": 110,
             "keywords": [
-              "検索",
+              "最新",
+              "最新ニュース",
+              "ニュース",
+              "今",
+              "今日",
+              "現在",
+              "直近",
+              "最新情報",
+              "公式",
+              "一次情報",
+              "Webで",
+              "ウェブで",
+              "ネットで",
+              "インターネットで",
               "調べて",
+              "検索して",
+              "確認して",
+              "見つけて",
               "探して",
-              "search",
+              "調査して",
+              "しらべて",
+              "調べもの",
+              "検索",
               "lookup",
-              "find"
+              "find",
+              "search"
             ],
             "toolName": "search_web",
             "argsTemplate": {
@@ -35,33 +55,31 @@
       },
       "aiRouting": {
         "enabled": true,
-        "provider": "openai",
-        "model": "gpt-4o-mini",
-        "systemPrompt": "あなたはMCPツールルーターです。必ずJSONのみで返してください。以下の形式に厳密に従ってください: {\"tool\":\"<toolName|no_tool>\",\"arguments\":{},\"confidence\":0.0,\"reason\":\"...\"}\ntoolは allowedTools に含まれる値か no_tool のみ許可します。\n\nルール:\n- userTextに http:// または https:// で始まるURLが含まれ、「解析」「クロール」「調べて」「サイト」などのキーワードがある場合は tool=crawl_site, arguments={\"url\": \"<そのURL>\"} を返す\n- URLのみが含まれる場合も crawl_site を使用する\n- 「検索」「調べて」などがある場合は search_web を使用する\n- 確信が低い場合は no_tool を選んでください",
-        "temperature": 0.7,
-        "maxTokens": 2000,
-        "confidenceThreshold": 0.6,
+        "provider": "ollama",
+        "model": "hf.co/LiquidAI/LFM2.5-8B-A1B-GGUF:Q4_K_M",
+        "systemPrompt": "あなたはMCPツールルーターです。\n必ずJSONのみで返してください。\n以下の形式に厳密に従ってください:\n{\"tool\":\"<toolName|no_tool>\",\"arguments\":{},\"confidence\":0.0,\"reason\":\"...\"}\n\n選択ルール:\n- allowedTools に含まれない tool は選ばない\n- URLが明示されているなら fetch_url を優先する\n- ユーザーが「最新」「最新情報」「ニュース」「今」「今日」「現在」「直近」「公式」「一次情報」「Webで」「ウェブで」「ネットで」「調べて」「検索して」「確認して」を求める場合は search_web を優先する\n- 特定サイトをまとめて辿る・広く巡回する意図なら crawl_site を優先する\n- ファイル探索や内容検索は search_files / read_file / search_content / list_directory を使う\n- メタ情報確認は get_server_metadata を使う\n- 根拠が弱い、または対象外なら no_tool を返す\n- 迷ったときは no_tool より search_web を優先する\n- reason は短く、選択理由だけを書く\n\n出力方針:\n- 余計な説明は書かない\n- 推測で tool を選ばない\n- JSON 以外は出力しない",
+        "temperature": 0.2,
+        "maxTokens": 256,
+        "confidenceThreshold": 0.45,
         "allowedTools": [
           "fetch_url",
+          "crawl_site",
           "search_web",
           "search_files",
           "read_file",
           "search_content",
           "list_directory",
           "get_server_metadata",
-          "crawl_site",
           "web_search",
           "search"
         ],
         "fallbackTool": "search_web"
       },
-      "createdAt": "2026-05-01T15:34:21.882Z",
-      "updatedAt": "2026-06-01T23:12:21.432Z",
-      "lastRuntimeSuccess": false,
-      "lastRuntimeAt": "2026-06-01T23:12:21.432Z",
       "isPreset": true,
-      "lastRuntimeError": "要求ツール 'calculate' はサーバー未実装です（available: fetch_url, crawl_site, search_web, search_files, read_file, search_content, list_directory, get_server_metadata）",
-      "lastRuntimeToolName": "calculate"
+      "updatedAt": "2026-06-03T09:09:57.560Z",
+      "lastRuntimeSuccess": true,
+      "lastRuntimeAt": "2026-06-03T09:09:57.560Z",
+      "lastRuntimeToolName": "search_web"
     },
     {
       "id": "google-workspace",
