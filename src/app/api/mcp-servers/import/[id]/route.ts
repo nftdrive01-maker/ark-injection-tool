@@ -130,6 +130,7 @@ export async function PUT(
     }
 
     const updatedServer = updateMCPServer(serverId, updatedPayload);
+  
 
     if (!updatedServer) {
       return NextResponse.json({ error: 'Server not found' }, { status: 404 });

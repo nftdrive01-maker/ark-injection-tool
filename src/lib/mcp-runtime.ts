@@ -94,6 +94,19 @@ function shouldUseMCP(userText: string): boolean {
 }
 
 function extractSearchQuery(userText: string): string {
+  const raw = (userText || '').replace(/\[(?:neutral|joyful|sad|angry)\]/gi, '').trim();
+  const looksLikeAssistantNarration = /(?:私、|ご希望|ご提案|お聞かせください|ご活用いただけます|まず.+まとめ|次に.+そして)/.test(raw);
+  const quotedTopic = raw.match(/[「\"]([^「」\"\n]{2,80})[」\"]/)?.[1]?.trim();
+
+  if (looksLikeAssistantNarration && quotedTopic) {
+    return quotedTopic;
+  }
+
+  const byTriedSearchPattern = raw.match(/([^\n。！？]{2,80}?)を調べ(?:ようとした|ました|た結果)/);
+  if (byTriedSearchPattern?.[1]?.trim()) {
+    return byTriedSearchPattern[1].trim();
+  }
+
   const byWebSearchPattern = userText.match(/([^\n。！？]+?)\s*を\s*(?:web|ウェブ|internet|インターネット)\s*で\s*(?:検索|調べ)(?:て|る|してください)?/i);
   if (byWebSearchPattern?.[1]?.trim()) {
     return byWebSearchPattern[1].trim();
@@ -125,7 +138,19 @@ function extractSearchQuery(userText: string): string {
     .replace(/^(?:検索|search|lookup|find)\s*(?:[:：]\s*)?/i, '')
     .trim();
 
-  return normalized || userText.trim() || '最新情報';
+  if (looksLikeAssistantNarration) {
+    const topicLike = normalized.match(/([^\n。！？]{2,80}?)(?:に関する|について)/)?.[1]?.trim();
+    if (topicLike) {
+      return topicLike;
+    }
+  }
+
+  const condensed = (normalized || raw || '最新情報')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return condensed.length > 120 ? condensed.slice(0, 120) : condensed;
 }
 
 function normalizeEstatSearchKeyword(userText: string, args: Record<string, unknown>): string {
@@ -877,11 +902,11 @@ function normalizeToolArguments(toolName: string, args: Record<string, unknown>,
   if (toolName === 'fetch_url') {
     const directUrl = typeof args.url === 'string' && args.url.trim() ? args.url.trim() : '';
     const query = typeof args.query === 'string' && args.query.trim()
-      ? args.query.trim()
+      ? extractSearchQuery(args.query)
       : typeof args.q === 'string' && args.q.trim()
-        ? args.q.trim()
+        ? extractSearchQuery(args.q)
         : typeof args.keyword === 'string' && args.keyword.trim()
-          ? args.keyword.trim()
+          ? extractSearchQuery(args.keyword)
           : '';
 
     const urlFromText = extractUrlFromText(userText);
@@ -898,11 +923,11 @@ function normalizeToolArguments(toolName: string, args: Record<string, unknown>,
 
   if (toolName === 'search_web' || toolName === 'web_search' || toolName === 'search') {
     const query = typeof args.query === 'string' && args.query.trim()
-      ? args.query.trim()
+      ? extractSearchQuery(args.query)
       : typeof args.q === 'string' && args.q.trim()
-        ? args.q.trim()
+        ? extractSearchQuery(args.q)
         : typeof args.keyword === 'string' && args.keyword.trim()
-          ? args.keyword.trim()
+          ? extractSearchQuery(args.keyword)
           : extractSearchQuery(userText);
     return { query };
   }
@@ -1434,7 +1459,7 @@ async function resolveAIDecision(
     args: normalizeToolArguments(parsed.tool, argumentsValue, userText),
   };
 }
-
+//MVO: ここにユーザーの入力テキストとサーバーの状態から、呼び出すツールと引数を決定するロジックを実装。ルールベース、AIベース、その他のヒューリスティクスなどを組み合わせて、最適なツール呼び出しを選択してください。
 async function pickToolAndArgs(
   server: MCPServer,
   userText: string,
@@ -1544,7 +1569,7 @@ function isAllowedGoogleReadonlyTool(toolName: string): boolean {
   }
   return GOOGLE_READONLY_TOOL_ALLOWLIST.includes(toolName);
 }
-
+//MVO: ここにサーバーへのツール呼び出しロジックを実装。ルーティング、ツール選択、呼び出し、エラーハンドリングなどを含む。
 async function callServerTool(
   server: MCPServer,
   userText: string,
@@ -1739,7 +1764,7 @@ async function callServerTool(
     await transport.close().catch(() => undefined);
   }
 }
-
+//ドメインごとのMCP実行ロジック。複数サーバーが指定された場合は順番に試す。全て失敗したら最後のエラーを返す。
 export async function executeMCPForDomain(input: {
   mcpServerIds?: string[];
   userText: string;

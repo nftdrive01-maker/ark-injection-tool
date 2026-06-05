@@ -386,6 +386,134 @@ function summarizePreviewRow(row: DbPreviewRow, preferredColumns: string[]): str
     .join(' / ');
 }
 
+type WebSearchResultItem = {
+  rank?: number;
+  title?: string;
+  url?: string;
+  domain?: string;
+  snippet?: string;
+  page_summary?: string;
+  page_excerpt?: string;
+  page_summary_status?: string;
+};
+
+type WebSearchPayload = {
+  query?: string;
+  engine?: string;
+  search_url?: string;
+  fetched_at?: string;
+  result_count?: number;
+  selected_count?: number;
+  results?: WebSearchResultItem[];
+  notes?: string[];
+};
+
+function parseWebSearchOutput(output: string): WebSearchPayload | null {
+  if (!output) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(output) as Partial<WebSearchPayload>;
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+
+    const results = Array.isArray(parsed.results)
+      ? parsed.results
+          .filter((item): item is WebSearchResultItem => Boolean(item) && typeof item === 'object')
+          .map((item, index) => ({
+            rank: typeof item.rank === 'number' && Number.isFinite(item.rank) ? item.rank : index + 1,
+            title: typeof item.title === 'string' ? item.title : '',
+            url: typeof item.url === 'string' ? item.url : '',
+            domain: typeof item.domain === 'string' ? item.domain : '',
+            snippet: typeof item.snippet === 'string' ? item.snippet : '',
+            page_summary: typeof item.page_summary === 'string' ? item.page_summary : '',
+            page_excerpt: typeof item.page_excerpt === 'string' ? item.page_excerpt : '',
+            page_summary_status: typeof item.page_summary_status === 'string' ? item.page_summary_status : '',
+          }))
+      : [];
+
+    const notes = Array.isArray(parsed.notes)
+      ? parsed.notes.filter((note): note is string => typeof note === 'string' && Boolean(note.trim()))
+      : [];
+
+    return {
+      query: typeof parsed.query === 'string' ? parsed.query : '',
+      engine: typeof parsed.engine === 'string' ? parsed.engine : '',
+      search_url: typeof parsed.search_url === 'string' ? parsed.search_url : '',
+      fetched_at: typeof parsed.fetched_at === 'string' ? parsed.fetched_at : '',
+      result_count: typeof parsed.result_count === 'number' && Number.isFinite(parsed.result_count) ? parsed.result_count : results.length,
+      selected_count: typeof parsed.selected_count === 'number' && Number.isFinite(parsed.selected_count) ? parsed.selected_count : results.length,
+      results,
+      notes,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatWebSearchPayloadForPrompt(payload: WebSearchPayload): string {
+  const lines: string[] = ['[WEB????]'];
+
+  if (payload.query) {
+    lines.push(`???: ${payload.query}`);
+  }
+  if (payload.fetched_at) {
+    lines.push(`????: ${payload.fetched_at}`);
+  }
+  if (typeof payload.result_count === 'number') {
+    lines.push(`??????: ${payload.result_count}`);
+  }
+
+  const results = Array.isArray(payload.results) ? payload.results.slice(0, 3) : [];
+  if (results.length > 0) {
+    lines.push('????:');
+    for (const result of results) {
+      const title = formatMcpPreviewValue(result.title);
+      const url = formatMcpPreviewValue(result.url);
+      const domain = formatMcpPreviewValue(result.domain);
+      const rawSummary = formatMcpPreviewValue(result.page_summary || result.snippet);
+      const summary = isLikelyEnglishText(rawSummary) ? '（英語のため要約を省略）' : rawSummary;
+      lines.push(`- ${result.rank ?? ''}${result.rank ? '. ' : ''}${title}`.trim());
+      if (domain !== '-') {
+        lines.push(`  ???: ${domain}`);
+      }
+      if (url !== '-') {
+        lines.push(`  URL: ${url}`);
+      }
+      if (summary !== '-') {
+        lines.push(`  ??: ${summary}`);
+      }
+    }
+  }
+
+  if (Array.isArray(payload.notes) && payload.notes.length > 0) {
+    lines.push('??:');
+    for (const note of payload.notes.slice(0, 3)) {
+      lines.push(`- ${note}`);
+    }
+  }
+
+  return lines.join('\n');
+
+}
+
+function isLikelyEnglishText(text: string): boolean {
+  if (!text) {
+    return false;
+  }
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return false;
+  }
+
+  const latinLetters = (normalized.match(/[A-Za-z]/g) || []).length;
+  const japaneseChars = (normalized.match(/[ぁ-んァ-ヶ一-龯]/g) || []).length;
+
+  return latinLetters >= 20 && latinLetters >= japaneseChars * 2;
+}
+
 function buildMcpReactionPrompt(params: {
   userText: string;
   serverId?: string;
@@ -396,6 +524,7 @@ function buildMcpReactionPrompt(params: {
   if (!dbResult || !Array.isArray(dbResult.previewRows) || dbResult.previewRows.length === 0) {
     return null;
   }
+
 
   const totalCount = typeof dbResult.totalCount === 'number' && Number.isFinite(dbResult.totalCount)
     ? dbResult.totalCount
@@ -417,6 +546,15 @@ function buildMcpReactionPrompt(params: {
   const reactionGuide = isSearchLike
     ? 'ユーザーに、あなた自身が検索して上位候補を見つけてきたように自然に報告してください。候補一覧を全文読み上げたり、そのまま列挙したりしてはいけません。どんな候補が見つかったかの傾向を短く伝え、必要なら次の絞り込み方を1つか2つ提案してください。回答は2〜4文程度に収めてください。'
     : 'ユーザーに、あなた自身が結果を確認してきたように自然に報告してください。表や一覧の全文を読み上げず、要点・傾向・次の見方を短く案内してください。回答は2〜4文程度に収めてください。';
+
+
+
+  console.log('--- MCP Reaction Prompt ---');
+  console.log(`User Text: ${userText}`);
+  console.log(`Server ID: ${serverId}`);
+  console.log(`Tool Name: ${toolName}`);
+
+
 
   return `
 ====================
@@ -562,6 +700,27 @@ ${knowledge.context || ''}
     ? extractDbResultPayload(mcpResult.output, userText, mcpResult.serverId, mcpResult.serverName, mcpResult.toolName)
     : undefined;
 
+
+  const isWebSearchMcp = mcpResult?.success
+    && mcpResult.serverId === 'mcp'
+    && mcpResult.toolName === 'search_web';
+  let injectedUserContext = '';
+
+  if (mcpResult?.success && mcpResult.output) {
+    const forceVerbatimAuthOutput = isGoogleAuthRequiredOutput(mcpResult.output);
+    const compactDbContext = formatDbResultForPrompt(dbResultPayload);
+    const reactionPrompt = buildMcpReactionPrompt({
+      userText,
+      serverId: mcpResult.serverId,
+      toolName: mcpResult.toolName,
+      dbResult: dbResultPayload,
+    });
+
+    if (reactionPrompt) {
+      injectedSystemPrompt += reactionPrompt;
+    }
+
+
   if (mcpResult?.success && mcpResult.output) {
     const forceVerbatimAuthOutput = isGoogleAuthRequiredOutput(mcpResult.output);
     const compactDbContext = formatDbResultForPrompt(dbResultPayload);
@@ -663,13 +822,14 @@ ${mcpCountSummary}
     }
   }
 
-  const chroniclePayload = chronicleResult?.success && chronicleResult.output
+const chroniclePayload = chronicleResult?.success && chronicleResult.output
     ? {
         title: 'CHRONICLE',
         content: chronicleResult.output,
         sourceName: chronicleResult.chronicleName,
       }
     : undefined;
+
 
   injectedSystemPrompt += `
 ====================
@@ -735,7 +895,7 @@ ${sourceBlock}
 
   const response: InjectionInterceptResponse = {
     injectedSystemPrompt,
-    injectedUserContext: '',
+    injectedUserContext,
     dbResult: dbResultPayload,
     chronicle: chroniclePayload,
     metadata: {

@@ -885,9 +885,10 @@ export async function testMCPServerConnection(id: string): Promise<{
 
   try {
     const startTime = Date.now();
+    const runtimeUrl = server.config.url ? resolveRuntimeUrl(server.config.url) : server.config.url;
 
-    if (server.transport === 'http' && server.config.url) {
-      const probes = buildHealthProbeCandidates(server.id, server.config.url);
+    if (server.transport === 'http' && runtimeUrl) {
+      const probes = buildHealthProbeCandidates(server.id, runtimeUrl);
       let lastError = '';
 
       for (const probeUrl of probes) {
@@ -923,12 +924,12 @@ export async function testMCPServerConnection(id: string): Promise<{
       };
     }
 
-    if (server.transport === 'sse' && server.config.url) {
+    if (server.transport === 'sse' && runtimeUrl) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), server.timeout);
 
       try {
-        const response = await fetch(server.config.url, {
+        const response = await fetch(runtimeUrl, {
           signal: controller.signal,
         });
         clearTimeout(timeout);
