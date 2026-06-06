@@ -90,7 +90,35 @@ function shouldUseMCP(userText: string): boolean {
     return true;
   }
 
-  return /(mcp|時刻|時間|何時|天気|weather|tool|計算|calculate|calc|式|ツール一覧|list tools|検索|調べて|search|lookup|find|drive|gmail|calendar|list_drive_items|drive_list_files|search_drive_files|統計|人口|人口推計|cpi|消費者物価指数|gdp|国内総生産|失業率|完全失業率|労働力調査|都道府県別|推移|ランキング|上位)/i.test(userText);
+  return /(mcp|検索|調べて|search|lookup|find|sql|dbhub|drive|gmail|calendar|統計|人口|cpi|gdp|失業率|時刻|時間|何時|天気|weather|計算|calculate|calc|式|ツール一覧|list tools)/i.test(userText);
+}
+
+function hasRuleKeywordMatch(server: MCPServer, userText: string): boolean {
+  const ruleRouting = server.ruleRouting;
+  if (!ruleRouting?.enabled || !Array.isArray(ruleRouting.rules) || ruleRouting.rules.length === 0) {
+    return false;
+  }
+
+  const normalizedText = userText.toLowerCase();
+  const enabledRules = ruleRouting.rules.filter((rule) => rule.enabled);
+  return enabledRules.some((rule) => Array.isArray(rule.keywords)
+    && rule.keywords.some((keyword) => keyword && normalizedText.includes(keyword.toLowerCase())));
+}
+
+function shouldAttemptRuleRouting(server: MCPServer, userText: string): boolean {
+  if (MCP_ALWAYS_ON) {
+    return true;
+  }
+
+  const ruleRouting = server.ruleRouting;
+  if (ruleRouting?.enabled && Array.isArray(ruleRouting.rules) && ruleRouting.rules.length > 0) {
+    const hasKeywordRules = ruleRouting.rules.some((rule) => rule.enabled && Array.isArray(rule.keywords) && rule.keywords.length > 0);
+    if (hasKeywordRules) {
+      return hasRuleKeywordMatch(server, userText);
+    }
+  }
+
+  return shouldUseMCP(userText);
 }
 
 function extractSearchQuery(userText: string): string {
@@ -1473,7 +1501,18 @@ async function pickToolAndArgs(
     : null;
 
   if (mode === 'rule') {
-    return resolveRuleDecision(server, userText) || dbHubFallback || (MCP_ALWAYS_ON ? createFallbackDecision(userText, availableTools) : null);
+    const byRule = resolveRuleDecision(server, userText);
+    if (byRule) {
+      return byRule;
+    }
+
+    if (server.aiRouting?.enabled) {
+      return (await resolveAIDecision(server, userText, availableTools, explorationSummary))
+        || dbHubFallback
+        || (MCP_ALWAYS_ON ? createFallbackDecision(userText, availableTools) : null);
+    }
+
+    return dbHubFallback || (MCP_ALWAYS_ON ? createFallbackDecision(userText, availableTools) : null);
   }
 
   if (mode === 'ai') {
@@ -1788,7 +1827,7 @@ export async function executeMCPForDomain(input: {
 
     const mode = server.mode || 'rule';
     const requiresDecision = mode === 'rule' && !server.aiRouting?.enabled;
-    if (requiresDecision && !MCP_ALWAYS_ON && !shouldUseMCP(userText)) {
+    if (requiresDecision && !shouldAttemptRuleRouting(server, userText)) {
       continue;
     }
 

@@ -10,7 +10,7 @@
       },
       "enabled": true,
       "timeout": 15000,
-      "mode": "hybrid",
+      "mode": "rule",
       "ruleRouting": {
         "enabled": true,
         "rules": [
@@ -54,9 +54,9 @@
         ]
       },
       "aiRouting": {
-        "enabled": true,
+        "enabled": false,
         "provider": "ollama",
-        "model": "hf.co/LiquidAI/LFM2.5-8B-A1B-GGUF:Q4_K_M",
+        "model": "qwen2.5:7b",
         "systemPrompt": "あなたはMCPツールルーターです。\n必ずJSONのみで返してください。\n以下の形式に厳密に従ってください:\n{\"tool\":\"<toolName|no_tool>\",\"arguments\":{},\"confidence\":0.0,\"reason\":\"...\"}\n\n選択ルール:\n- allowedTools に含まれない tool は選ばない\n- URLが明示されているなら fetch_url を優先する\n- ユーザーが「最新」「最新情報」「ニュース」「今」「今日」「現在」「直近」「公式」「一次情報」「Webで」「ウェブで」「ネットで」「調べて」「検索して」「確認して」を求める場合は search_web を優先する\n- 特定サイトをまとめて辿る・広く巡回する意図なら crawl_site を優先する\n- ファイル探索や内容検索は search_files / read_file / search_content / list_directory を使う\n- メタ情報確認は get_server_metadata を使う\n- 迷ったときは no_tool より search_web を優先する\n- reason は短く、選択理由だけを書く\n\n出力方針:\n- 余計な説明は書かない\n- 推測で tool を選ばない\n- JSON 以外は出力しない",
         "temperature": 0.2,
         "maxTokens": 256,
@@ -76,9 +76,9 @@
         "fallbackTool": "search_web"
       },
       "isPreset": true,
-      "updatedAt": "2026-06-05T05:47:03.185Z",
+      "updatedAt": "2026-06-05T07:18:46.027Z",
       "lastRuntimeSuccess": true,
-      "lastRuntimeAt": "2026-06-05T05:47:03.185Z",
+      "lastRuntimeAt": "2026-06-05T07:18:46.027Z",
       "lastRuntimeToolName": "search_web"
     },
     {
@@ -138,7 +138,7 @@
       },
       "enabled": true,
       "timeout": 30000,
-      "mode": "hybrid",
+      "mode": "rule",
       "ruleRouting": {
         "enabled": true,
         "rules": [
@@ -147,6 +147,14 @@
             "enabled": true,
             "priority": 200,
             "keywords": [
+              "DBHub",
+              "dbhub",
+              "DBHub MCP",
+              "PostgreSQL",
+              "postgres",
+              "database",
+              "データベース",
+              "DB",
               "テーブル",
               "table",
               "カラム",
@@ -154,8 +162,15 @@
               "項目",
               "構成",
               "schema",
+              "schema確認",
+              "schema確認",
               "column",
-              "field"
+              "field",
+              "一覧",
+              "検索",
+              "探して",
+              "調べて",
+              "見せて"
             ],
             "toolName": "search_objects"
           },
@@ -164,20 +179,42 @@
             "enabled": true,
             "priority": 190,
             "keywords": [
+              "DBHub",
+              "dbhub",
+              "PostgreSQL",
+              "postgres",
+              "database",
+              "データベース",
+              "SQL",
               "sql",
+              "クエリ",
               "select",
               "where",
               "join",
+              "group by",
+              "order by",
               "count",
+              "sum",
+              "avg",
+              "max",
+              "min",
               "集計",
-              "件数"
+              "件数",
+              "合計",
+              "平均",
+              "最大",
+              "最小",
+              "抽出",
+              "条件",
+              "レコード",
+              "一覧"
             ],
             "toolName": "execute_sql"
           }
         ]
       },
       "aiRouting": {
-        "enabled": true,
+        "enabled": false,
         "provider": "ollama",
         "model": "qwen2.5:7b",
         "systemPrompt": "あなたはDB用MCPツールルーターです。\n必ずJSONのみで返してください。\n以下の形式に厳密に従ってください:\n{\"tool\":\"<toolName|no_tool>\",\"arguments\":{},\"confidence\":0.0,\"reason\":\"...\"}\ntoolは allowedTools に含まれる値か no_tool のみ許可します。\n構造確認・存在確認は search_objects を優先し、件数・一覧・集計・抽出は execute_sql を優先してください。\nユーザーがテーブル名を明示しない場合でも、業務語から最も近いテーブル・カラムを推定してください。\n複数候補がある場合は、最も自然な候補を1つ選び、reason に判断根拠を短く書いてください。\n曖昧でも metadata から候補が見つかる場合は no_tool を避け、適切な候補を選んでください。\n無関係または根拠が足りない場合のみ no_tool を返してください。\n\n対象MCPサーバー名: DBHub (PostgreSQL MCP)\nサーバー概要: DBHub 経由で PostgreSQL に SQL を実行するMCPサーバー。テーブル一覧・データ検索・集計などに使用します。\n利用可能ツール: execute_sql, search_objects\nsearch_objects を使えるため、テーブル名・カラム名・構造確認はまずこれで確認してください。\nexecute_sql を使えるため、件数・一覧・集計・絞り込みは SQL で取得してください。\n\n以下のDBメタ情報を優先して参照し、自然言語から最も近いテーブルとカラムを選んでください。\nDB metadata exploration result:\ntables: properties\ntable properties: columns=id, title, city, ward, rent, rooms, size, built_year, pet_ok, station, walk_minutes, description, updated_at",
@@ -188,14 +225,15 @@
           "execute_sql",
           "search_objects"
         ],
-        "fallbackTool": "execute_sql"
+        "fallbackTool": "search_objects"
       },
       "createdAt": "2026-05-19T00:00:00.000Z",
-      "updatedAt": "2026-06-03T13:58:03.225Z",
-      "lastRuntimeSuccess": true,
-      "lastRuntimeAt": "2026-05-22T08:09:58.813Z",
+      "updatedAt": "2026-06-05T23:45:09.958Z",
+      "lastRuntimeSuccess": false,
+      "lastRuntimeAt": "2026-06-05T23:45:09.958Z",
+      "isPreset": true,
       "lastRuntimeToolName": "execute_sql",
-      "isPreset": true
+      "lastRuntimeError": "{\n  \"success\": false,\n  \"error\": \"relation \\\"customers\\\" does not exist\",\n  \"code\": \"EXECUTION_ERROR\"\n}"
     },
     {
       "id": "estat",

@@ -54,12 +54,20 @@ export async function POST(req: NextRequest) {
     }
 
     const { userText, domainId } = body;
+    const isUserInput = body.isUserInput !== false;
     const sessionId = (body.sessionId || '').trim();
     const headerUserId = req.headers.get('x-user-id') || '';
     const userId = headerUserId.trim() || (sessionId ? `anonymous:${sessionId}` : 'anonymous:unknown-session');
 
     // userText が必須
     if (!userText) {
+      return NextResponse.json({} as InjectionInterceptResponse, {
+        status: 200,
+        headers: corsHeaders,
+      });
+    }
+
+    if (!isUserInput) {
       return NextResponse.json({} as InjectionInterceptResponse, {
         status: 200,
         headers: corsHeaders,
