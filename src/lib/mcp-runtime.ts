@@ -806,6 +806,22 @@ function buildDbHubCountSql(userText: string, explorationSummary?: string): stri
   return `SELECT COUNT(*) AS total_count FROM ${formatDbHubSqlIdentifier(selectedTable.tableName)};`;
 }
 
+function extractSqlStatementFromText(userText: string): string | null {
+  const match = userText.match(/\b(?:select|insert|update|delete|with)\b[\s\S]*?(?:;|。|です|ください|\r?\n|$)/i);
+  if (!match?.[0]) {
+    return null;
+  }
+
+  return match[0]
+    .replace(/[「」『』`]/g, '')
+    .replace(/(?:。|です|ください)$/u, '')
+    .trim();
+}
+
+function hasDbHubSqlExecutionIntent(userText: string): boolean {
+  return /(?:execute_sql|sql|select|insert|update|delete|with\b|from\b|where\b|join\b|group\s+by|order\s+by|count\s*\(|count\b|sum\s*\(|avg\s*\(|max\s*\(|min\s*\(|件数|集計|合計|平均|抽出|実行)/i.test(userText);
+}
+
 function normalizeDbHubToolArguments(toolName: string, args: Record<string, unknown>, userText: string): Record<string, unknown> {
   if (toolName === 'search_objects') {
     const query = typeof args.query === 'string' && args.query.trim()
@@ -832,7 +848,7 @@ function normalizeDbHubToolArguments(toolName: string, args: Record<string, unkn
       ? args.sql.trim()
       : typeof args.query === 'string' && args.query.trim()
         ? args.query.trim()
-        : '';
+        : extractSqlStatementFromText(userText) || '';
 
     if (!sql) {
       return {
@@ -1148,6 +1164,16 @@ function resolveRuleDecision(server: MCPServer, userText: string): ToolDecision 
       return {
         name: countRule.toolName,
         args: buildRuleArgs(countRule, userText),
+      };
+    }
+  }
+
+  if (server.id === 'dbhub' && hasDbHubSqlExecutionIntent(userText)) {
+    const sqlRule = ruleRouting.rules.find((rule) => rule.enabled && rule.toolName === 'execute_sql');
+    if (sqlRule) {
+      return {
+        name: sqlRule.toolName,
+        args: buildRuleArgs(sqlRule, userText),
       };
     }
   }

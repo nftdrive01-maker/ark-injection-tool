@@ -154,6 +154,30 @@ function buildHealthProbeCandidates(serverId: string, rawUrl: string): string[] 
       hostDockerInternal.port = publicPort;
       push(buildHealthProbeUrl(hostDockerInternal.toString()));
     }
+
+    if (serverId === 'dbhub') {
+      const workbench = new URL(rawUrl);
+      workbench.pathname = '/';
+      workbench.search = '';
+      workbench.hash = '';
+      push(workbench.toString());
+
+      const mcpEndpoint = new URL(rawUrl);
+      mcpEndpoint.pathname = '/mcp';
+      mcpEndpoint.search = '';
+      mcpEndpoint.hash = '';
+      push(mcpEndpoint.toString());
+
+      const publicPort = process.env.DBHUB_PORT || '8080';
+      const localhost = new URL(rawUrl);
+      localhost.hostname = 'localhost';
+      localhost.port = publicPort;
+      push(buildHealthProbeUrl(localhost.toString()));
+      localhost.pathname = '/';
+      localhost.search = '';
+      localhost.hash = '';
+      push(localhost.toString());
+    }
   } catch {
     // URL解析不可時は primary のみ使用
   }

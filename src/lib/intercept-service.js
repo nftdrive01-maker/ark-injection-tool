@@ -268,7 +268,7 @@ function extractDbResultPayload(output, userText, serverId, serverName, toolName
         var firstRow = (_b = rows[0]) !== null && _b !== void 0 ? _b : {};
         var totalCountEntry_1 = Object.entries(firstRow).find(function (_a) {
             var key = _a[0], value = _a[1];
-            if (!/(?:^|_)(?:count|total_count|total|件数|総数)(?:$|_)/i.test(key)) {
+            if (!/^(?:count|total_count|total|row_count|件数|総数)$/i.test(key)) {
                 return false;
             }
             var normalizedValue = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
@@ -277,7 +277,7 @@ function extractDbResultPayload(output, userText, serverId, serverName, toolName
         var totalCount = totalCountEntry_1
             ? Number(typeof totalCountEntry_1[1] === 'number' ? totalCountEntry_1[1] : String(totalCountEntry_1[1]).trim())
             : undefined;
-        var previewRowsSource = totalCountEntry_1 ? rows.slice(1) : rows;
+        var previewRowsSource = totalCountEntry_1 && Object.keys(firstRow).length === 1 ? rows.slice(1) : rows;
         if (previewRowsSource.length === 0) {
             return undefined;
         }

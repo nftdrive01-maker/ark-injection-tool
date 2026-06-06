@@ -289,7 +289,7 @@ function extractDbResultPayload(
 
     const firstRow = rows[0] ?? {};
     const totalCountEntry = Object.entries(firstRow).find(([key, value]) => {
-      if (!/(?:^|_)(?:count|total_count|total|件数|総数)(?:$|_)/i.test(key)) {
+      if (!/^(?:count|total_count|total|row_count|件数|総数)$/i.test(key)) {
         return false;
       }
 
@@ -301,7 +301,7 @@ function extractDbResultPayload(
       ? Number(typeof totalCountEntry[1] === 'number' ? totalCountEntry[1] : String(totalCountEntry[1]).trim())
       : undefined;
 
-    const previewRowsSource = totalCountEntry ? rows.slice(1) : rows;
+    const previewRowsSource = totalCountEntry && Object.keys(firstRow).length === 1 ? rows.slice(1) : rows;
     if (previewRowsSource.length === 0) {
       return undefined;
     }
@@ -939,4 +939,6 @@ ${sourceBlock}
   }
 
   return response;
+}
+
 }

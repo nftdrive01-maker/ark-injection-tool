@@ -229,9 +229,9 @@
         "fallbackTool": "search_objects"
       },
       "createdAt": "2026-05-19T00:00:00.000Z",
-      "updatedAt": "2026-06-06T07:41:44.599Z",
+      "updatedAt": "2026-06-06T08:29:19.825Z",
       "lastRuntimeSuccess": true,
-      "lastRuntimeAt": "2026-06-06T07:41:44.599Z",
+      "lastRuntimeAt": "2026-06-06T08:29:19.825Z",
       "isPreset": true,
       "lastRuntimeToolName": "execute_sql"
     },
