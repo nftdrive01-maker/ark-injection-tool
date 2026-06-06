@@ -179,6 +179,7 @@
             "enabled": true,
             "priority": 190,
             "keywords": [
+              "execute_sql",
               "DBHub",
               "dbhub",
               "PostgreSQL",
@@ -228,12 +229,11 @@
         "fallbackTool": "search_objects"
       },
       "createdAt": "2026-05-19T00:00:00.000Z",
-      "updatedAt": "2026-06-05T23:45:09.958Z",
-      "lastRuntimeSuccess": false,
-      "lastRuntimeAt": "2026-06-05T23:45:09.958Z",
+      "updatedAt": "2026-06-06T07:41:44.599Z",
+      "lastRuntimeSuccess": true,
+      "lastRuntimeAt": "2026-06-06T07:41:44.599Z",
       "isPreset": true,
-      "lastRuntimeToolName": "execute_sql",
-      "lastRuntimeError": "{\n  \"success\": false,\n  \"error\": \"relation \\\"customers\\\" does not exist\",\n  \"code\": \"EXECUTION_ERROR\"\n}"
+      "lastRuntimeToolName": "execute_sql"
     },
     {
       "id": "estat",
