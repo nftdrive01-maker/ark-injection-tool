@@ -77,7 +77,7 @@ interface MCPServerStore {
 
 const MCP_SERVERS_CONFIG_PATH = process.env.INJECTION_MCP_SERVERS_CONFIG || './data/mcp-servers.json';
 const DEFAULT_MCP_TIMEOUT = parseInt(process.env.INJECTION_DEFAULT_MCP_TIMEOUT || '30000', 10);
-const DEFAULT_PRESET_MCP_SERVER_IDS = ['dbhub', 'google-workspace', 'estat', 'mcp'] as const;
+const DEFAULT_PRESET_MCP_SERVER_IDS = ['guide', 'dbhub', 'google-workspace', 'estat', 'mcp'] as const;
 
 const DEFAULT_PRESET_MCP_SERVER_ORDER = new Map<string, number>(
   DEFAULT_PRESET_MCP_SERVER_IDS.map((id, index) => [id, index])
@@ -106,6 +106,60 @@ function sortMCPServers(servers: MCPServer[]): MCPServer[] {
 
     return left.name.localeCompare(right.name, 'ja');
   });
+}
+
+function createGuidePresetServer(): MCPServer {
+  const now = new Date().toISOString();
+  return normalizeMCPServer({
+    id: 'guide',
+    name: 'Guide MCP',
+    description: 'DomainにアタッチされたガイドDeckを検索し、presentationモードを開始する内部MCPです。',
+    isPreset: true,
+    transport: 'http',
+    config: {
+      url: 'internal://guide',
+    },
+    enabled: true,
+    timeout: DEFAULT_MCP_TIMEOUT,
+    mode: 'rule',
+    ruleRouting: {
+      enabled: true,
+      rules: [
+        {
+          id: 'guide_start',
+          enabled: true,
+          priority: 220,
+          keywords: ['ガイド', 'guide', 'プレゼン', 'presentation', 'スライド', '説明を始めて', '再生', '開始', 'デモ'],
+          toolName: 'guide_start',
+        },
+        {
+          id: 'guide_search',
+          enabled: true,
+          priority: 210,
+          keywords: ['ガイド検索', 'guide search', '探して', 'ありますか', '一覧'],
+          toolName: 'guide_search',
+        },
+      ],
+    },
+    aiRouting: {
+      enabled: false,
+      provider: 'ollama',
+      model: process.env.INJECTION_MCP_ROUTER_MODEL || process.env.NEXT_PUBLIC_OLLAMA_MODEL || 'qwen2.5:7b',
+      systemPrompt: 'ユーザーがガイド、プレゼン、デモ、説明開始を求めた場合は guide_search または guide_start を選んでください。',
+      temperature: 0.1,
+      maxTokens: 240,
+      confidenceThreshold: 0.55,
+      allowedTools: ['guide_list', 'guide_search', 'guide_get', 'guide_start'],
+      fallbackTool: 'guide_search',
+    },
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+function withPresetMCPServers(servers: MCPServer[]): MCPServer[] {
+  const hasGuide = servers.some((server) => server.id === 'guide');
+  return hasGuide ? servers : [createGuidePresetServer(), ...servers];
 }
 
 function buildHealthProbeUrl(rawUrl: string): string {
@@ -728,7 +782,7 @@ function writeStoreToFile(store: MCPServerStore): void {
  */
 export function getAllMCPServers(): MCPServer[] {
   const store = loadStoreFromFile();
-  return sortMCPServers(store.servers);
+  return sortMCPServers(withPresetMCPServers(store.servers));
 }
 
 /**
@@ -736,7 +790,7 @@ export function getAllMCPServers(): MCPServer[] {
  */
 export function getMCPServerById(id: string): MCPServer | undefined {
   const store = loadStoreFromFile();
-  return store.servers.find((server) => server.id === id);
+  return withPresetMCPServers(store.servers).find((server) => server.id === id);
 }
 
 /**

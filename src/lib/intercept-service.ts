@@ -666,9 +666,18 @@ ${knowledge.context || ''}
   }
 
   const resolvedMcpServerIds = [...(domain.mcpServerIds || [])];
+  const hasAttachedGuides = Array.isArray(domain.attachedGuideIds) && domain.attachedGuideIds.length > 0;
+  if (hasAttachedGuides) {
+    const withoutGuide = resolvedMcpServerIds.filter((serverId) => serverId !== 'guide');
+    // Domain-attached guides should be evaluated before other MCP servers.
+    resolvedMcpServerIds.splice(0, resolvedMcpServerIds.length, 'guide', ...withoutGuide);
+    // GuideがDomainに紐づいている場合は、MCPサーバー選択漏れでも内部Guide MCPを優先して試す。
+    resolvedMcpServerIds.splice(0, resolvedMcpServerIds.length, 'guide', ...withoutGuide);
+  }
   const mcpResult = await executeMCPForDomain({
     mcpServerIds: resolvedMcpServerIds,
     userText,
+    domainId: domain.id,
     requestId,
     sessionId,
     userId,
@@ -891,6 +900,7 @@ ${sourceBlock}
       mcpToolName: mcpResult?.toolName,
       mcpError: mcpResult && !mcpResult.success ? mcpResult.error : undefined,
       mcpErrorCode: mcpResult && !mcpResult.success ? mcpResult.errorCode : undefined,
+      guideAction: mcpResult?.guideAction,
       attachedPackIds,
       chronicleUsed: Boolean(chronicleResult?.success),
       chronicleName: chronicleResult?.chronicleName,

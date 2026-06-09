@@ -233,25 +233,193 @@ Amica側の動作:
 - JSONプレビュー
 - JSONダウンロード
 
+## Domainへのアタッチ
+
+Guide MCP は、DomainにアタッチされたGuideだけを参照します。
+
+Domain側のデータ構造:
+
+```json
+{
+  "id": "db-mcp",
+  "name": "DB-mcp",
+  "mcpServerIds": ["guide"],
+  "attachedGuideIds": ["ark_i_web_demo"]
+}
+```
+
+設定手順:
+
+1. 管理画面の「ドメイン管理」を開く
+2. 対象Domainを選ぶ
+3. サブタブ「連携・構成」を開く
+4. 「アタッチするガイド」でGuideを選ぶ
+5. 「組み合わせるMCPサーバー」で `Guide MCP` をONにする
+6. Domainを保存する
+
+参照制限:
+
+- `domain_id` が指定された場合、そのDomainの `attachedGuideIds` に含まれるGuideだけ検索できます。
+- 他Domainにだけ紐づくGuideは検索・取得・開始できません。
+- `attachedGuideIds` が空の場合、Guide MCPは空結果または開始失敗を返します。
+
+## Guide MCP
+
+Guide MCP は外部プロセスではなく、injection-tool内部の疑似MCPとして実装しています。
+
+MCPサーバー一覧にはプリセットとして表示されます。
+
+```text
+Guide MCP
+id: guide
+transport: internal
+```
+
+ツール名は安全のためドットではなくアンダースコアを使います。
+
+| ツール | 説明 |
+| --- | --- |
+| `guide_list` | DomainにアタッチされたGuide一覧を返す |
+| `guide_search` | DomainにアタッチされたGuideをタイトル、説明、タグ、notesから検索する |
+| `guide_get` | Domainにアタッチされた指定GuideのDeck JSONを返す |
+| `guide_start` | DomainにアタッチされたGuideの再生開始イベントを返す |
+
+### guide_list
+
+入力:
+
+```json
+{
+  "domain_id": "db-mcp"
+}
+```
+
+出力:
+
+```json
+{
+  "type": "guide.list",
+  "domain_id": "db-mcp",
+  "guides": [
+    {
+      "guide_id": "ark_i_web_demo",
+      "title": "Ark-i Webデモ",
+      "slide_count": 3
+    }
+  ]
+}
+```
+
+### guide_search
+
+入力:
+
+```json
+{
+  "domain_id": "db-mcp",
+  "query": "Ark-i Webデモ"
+}
+```
+
+検索対象:
+
+- `deck_id`
+- `title`
+- `description`
+- `tags`
+- `slides.title`
+- `slides.url`
+- `slides.notes`
+
+### guide_get
+
+入力:
+
+```json
+{
+  "domain_id": "db-mcp",
+  "guide_id": "ark_i_web_demo"
+}
+```
+
+DomainにアタッチされていないGuideは返しません。
+
+### guide_start
+
+入力:
+
+```json
+{
+  "domain_id": "db-mcp",
+  "guide_id": "ark_i_web_demo"
+}
+```
+
+戻り値は `metadata.guideAction` としてAmicaへ渡されます。
+
+```json
+{
+  "type": "start",
+  "domainId": "db-mcp",
+  "guideId": "ark_i_web_demo",
+  "guide": {
+    "deck_id": "ark_i_web_demo",
+    "title": "Ark-i Webデモ",
+    "slides": []
+  }
+}
+```
+
+## AI Router / 発火ルール
+
+Domainに `Guide MCP` がアタッチされている場合、以下のような発話でGuide MCPが起動します。
+
+例:
+
+```text
+Ark-iのWebデモを始めて
+ガイドを再生して
+プレゼンを開始して
+このサービスの説明を流して
+展示会デモを見せて
+```
+
+現在の実装では、Guide MCP内部で次のように解釈します。
+
+- 「一覧」「どんなガイド」系: `guide_list`
+- 「開始」「再生」「プレゼン」「デモ」「説明して」系: `guide_start`
+- 「ガイド」「スライド」系: `guide_search`
+
+`guide_start` では `guide_id` が明示されていない場合、検索結果の先頭、またはDomainにアタッチされた最初のGuideを開始します。
+
 ## Amica側との接続方針
 
-現時点の Amica presentation モードは、固定サンプルDeckを読み込む実装です。
+Amica presentation モードは、既存のプレゼンテーションモーダルをGuide Playerとして流用します。
 
-次の段階では、injection-tool の `/api/guides` または公開用APIからDeck JSONを取得し、Amica側の固定サンプルを置き換える想定です。
+`guide_start` が発火すると、injection-tool は `metadata.guideAction` にDeck JSONを入れて返します。
 
-想定フロー:
+Amica側の動作:
 
-1. injection-tool のガイド管理でDeckを作成
-2. `data/guides.json` に保存
-3. Amicaが対象Deckを取得
-4. presentationモードで表示・自動送り・TTS発話
+1. チャット入力をinjection-toolへ送る
+2. Guide MCPが `guide_start` を返す
+3. Amicaが `metadata.guideAction` を検出
+4. `amica:guide-start` イベントを発火
+5. 既存プレゼンテーションモーダルにDeckを読み込む
+6. 1ページ目を表示
+7. `notes` をTTSへ送る
+8. `display_seconds` に合わせて自動ページ切替
+9. 最終ページ後はチャットへ戻る
 
 ## 実装ファイル
 
 サーバー側:
 
 ```text
+src/lib/domains.ts
 src/lib/guides.ts
+src/lib/mcp-runtime.ts
+src/lib/mcp-servers.ts
+src/lib/intercept-service.ts
 src/app/api/guides/route.ts
 src/app/api/guides/[id]/route.ts
 ```
@@ -260,6 +428,14 @@ src/app/api/guides/[id]/route.ts
 
 ```text
 src/app/admin/page.tsx
+```
+
+Amica側:
+
+```text
+src/features/chat/chat.ts
+src/components/messageInput.tsx
+src/types/injection.ts
 ```
 
 ## 検証コマンド

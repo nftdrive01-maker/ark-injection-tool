@@ -40,6 +40,7 @@ interface Domain {
   knowledgeIds: string[];
   memoryIds?: string[];
   mcpServerIds?: string[];
+  attachedGuideIds?: string[];
   chronicleIds?: string[];
   systemPrompt: string;
   context: string;
@@ -481,6 +482,7 @@ function normalizeAdminDomain(domain: Domain): Domain {
     headerImageUrl: typeof domain.headerImageUrl === 'string' ? domain.headerImageUrl : '',
     themeColor: typeof domain.themeColor === 'string' ? domain.themeColor : '',
     ttsBackend: typeof domain.ttsBackend === 'string' ? domain.ttsBackend : '',
+    attachedGuideIds: Array.isArray(domain.attachedGuideIds) ? domain.attachedGuideIds : [],
     accessControlEnabled: domain.accessControlEnabled === true,
     accessUsers: Array.isArray(domain.accessUsers)
       ? domain.accessUsers.map((user) => ({
@@ -3370,6 +3372,18 @@ export default function AdminPage() {
     setSelectedDomain({ ...selectedDomain, knowledgeIds });
   };
 
+  const toggleDomainGuide = (guideId: string) => {
+    if (!selectedDomain) return;
+
+    const current = selectedDomain.attachedGuideIds || [];
+    const exists = current.includes(guideId);
+    const attachedGuideIds = exists
+      ? current.filter((id) => id !== guideId)
+      : [...current, guideId];
+
+    setSelectedDomain({ ...selectedDomain, attachedGuideIds });
+  };
+
   const toggleDomainChronicle = (chronicleId: string) => {
     if (!selectedDomain) return;
 
@@ -5443,6 +5457,35 @@ export default function AdminPage() {
                         {knowledge.name}
                       </label>
                     ))}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '15px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+                    アタッチするガイド
+                  </label>
+                  <div style={{ border: '1px solid #ddd', borderRadius: '4px', padding: '8px', maxHeight: '180px', overflowY: 'auto' }}>
+                    {guides.length === 0 ? (
+                      <div style={{ color: '#666', fontSize: '12px' }}>ガイド管理でガイドを登録してください</div>
+                    ) : (
+                      guides.map((guide) => (
+                        <label key={guide.deck_id} style={{ display: 'block', marginBottom: '8px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={(selectedDomain.attachedGuideIds || []).includes(guide.deck_id)}
+                            onChange={() => toggleDomainGuide(guide.deck_id)}
+                            style={{ marginRight: '8px' }}
+                          />
+                          <strong>{guide.title}</strong>
+                          <span style={{ marginLeft: '6px', color: '#666', fontSize: '12px' }}>
+                            ({guide.deck_id} / {guide.slides.length}ページ)
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  <div style={{ marginTop: '6px', fontSize: '12px', color: '#666' }}>
+                    Guide MCPはここでアタッチされたガイドだけを domain_id 付きで検索・再生できます。
                   </div>
                 </div>
 

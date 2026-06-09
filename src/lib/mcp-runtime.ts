@@ -9,6 +9,14 @@ import {
   setMCPServerRuntimeStatus,
 } from './mcp-servers';
 import { MCPAuditErrorCode, writeMCPAuditLog } from './mcp-audit-log';
+import { type GuideDeck, getGuideForDomain, getGuidesForDomain, searchGuidesForDomain } from './guides';
+
+export interface GuideAction {
+  type: 'start';
+  domainId: string;
+  guideId: string;
+  guide: GuideDeck;
+}
 
 export interface MCPExecutionResult {
   success: boolean;
@@ -16,6 +24,7 @@ export interface MCPExecutionResult {
   serverName?: string;
   toolName?: string;
   output?: string;
+  guideAction?: GuideAction;
   error?: string;
   errorCode?: MCPAuditErrorCode;
 }
@@ -28,6 +37,37 @@ const GOOGLE_READONLY_TOOL_ALLOWLIST = (process.env.INJECTION_GOOGLE_READONLY_TO
   .split(',')
   .map((item) => item.trim())
   .filter(Boolean);
+const GUIDE_TOOL_NAMES = ['guide_list', 'guide_search', 'guide_get', 'guide_start'];
+const GUIDE_LIST_KEYWORDS = [
+  '\u4e00\u89a7', // 一覧
+  '\u30ea\u30b9\u30c8', // リスト
+  'list',
+  '\u3069\u3093\u306a', // どんな
+  '\u4f55\u304c\u3042\u308b', // 何がある
+];
+const GUIDE_START_KEYWORDS = [
+  '\u958b\u59cb', // 開始
+  '\u59cb\u3081\u3066', // 始めて
+  '\u306f\u3058\u3081\u3066', // はじめて
+  '\u518d\u751f', // 再生
+  '\u6d41\u3057\u3066', // 流して
+  '\u898b\u305b\u3066', // 見せて
+  '\u30d7\u30ec\u30bc\u30f3', // プレゼン
+  'presentation',
+  '\u30c7\u30e2', // デモ
+  '\u8aac\u660e\u3057\u3066', // 説明して
+];
+const GUIDE_SEARCH_KEYWORDS = [
+  '\u30ac\u30a4\u30c9', // ガイド
+  'guide',
+  '\u30b9\u30e9\u30a4\u30c9', // スライド
+  '\u6848\u5185', // 案内
+];
+
+function includesAnyKeyword(text: string, keywords: string[]): boolean {
+  const normalizedText = text.toLowerCase();
+  return keywords.some((keyword) => normalizedText.includes(keyword.toLowerCase()));
+}
 
 interface ToolDecision {
   name: string;
@@ -86,11 +126,15 @@ function buildWebSearchUrl(query: string): string {
 }
 
 function shouldUseMCP(userText: string): boolean {
+  if (includesAnyKeyword(userText, GUIDE_SEARCH_KEYWORDS) || includesAnyKeyword(userText, GUIDE_START_KEYWORDS)) {
+    return true;
+  }
+
   if (MCP_ALWAYS_ON) {
     return true;
   }
 
-  return /(mcp|検索|調べて|search|lookup|find|sql|dbhub|drive|gmail|calendar|統計|人口|cpi|gdp|失業率|時刻|時間|何時|天気|weather|計算|calculate|calc|式|ツール一覧|list tools)/i.test(userText);
+  return /(mcp|検索|調べて|search|lookup|find|sql|dbhub|drive|gmail|calendar|統計|人口|cpi|gdp|失業率|時刻|時間|何時|天気|weather|計算|calculate|calc|式|ツール一覧|list tools|ガイド|guide|プレゼン|presentation|スライド|デモ|再生|開始)/i.test(userText);
 }
 
 function hasRuleKeywordMatch(server: MCPServer, userText: string): boolean {
@@ -932,6 +976,14 @@ function createFallbackDecision(userText: string, availableTools: string[]): Too
 }
 
 function normalizeToolArguments(toolName: string, args: Record<string, unknown>, userText: string): Record<string, unknown> {
+  if (GUIDE_TOOL_NAMES.includes(toolName)) {
+    return {
+      ...args,
+      query: typeof args.query === 'string' && args.query.trim() ? args.query.trim() : userText,
+      guide_id: typeof args.guide_id === 'string' ? args.guide_id.trim() : '',
+    };
+  }
+
   if (toolName === 'crawl_site') {
     const directUrl = typeof args.url === 'string' && args.url.trim() ? args.url.trim() : '';
     const urlFromText = extractUrlFromText(userText);
@@ -1057,6 +1109,177 @@ function normalizeToolArguments(toolName: string, args: Record<string, unknown>,
   }
 
   return args;
+}
+
+function selectGuideTool(userText: string): ToolDecision | null {
+  const guideWantsList = includesAnyKeyword(userText, GUIDE_LIST_KEYWORDS);
+  const guideWantsStart = includesAnyKeyword(userText, GUIDE_START_KEYWORDS);
+
+  if (guideWantsList && !guideWantsStart) {
+    return { name: 'guide_list', args: {} };
+  }
+
+  if (guideWantsStart) {
+    return { name: 'guide_start', args: { query: userText } };
+  }
+
+  if (includesAnyKeyword(userText, GUIDE_SEARCH_KEYWORDS)) {
+    return { name: 'guide_search', args: { query: userText } };
+  }
+  const wantsList = /(一覧|リスト|list|どんな|何がある)/i.test(userText);
+  const wantsStart = /(開始|始めて|再生|流して|見せて|プレゼン|presentation|デモ|説明して)/i.test(userText);
+
+  if (wantsList && !wantsStart) {
+    return { name: 'guide_list', args: {} };
+  }
+
+  if (wantsStart) {
+    return { name: 'guide_start', args: { query: userText } };
+  }
+
+  if (/(ガイド|guide|スライド)/i.test(userText)) {
+    return { name: 'guide_search', args: { query: userText } };
+  }
+
+  return null;
+}
+
+function summarizeGuide(guide: GuideDeck): Record<string, unknown> {
+  return {
+    guide_id: guide.deck_id,
+    title: guide.title,
+    description: guide.description,
+    tags: guide.tags,
+    slide_count: guide.slides.length,
+    updatedAt: guide.updatedAt,
+  };
+}
+
+function pickGuideForStart(domainId: string, userText: string, args: Record<string, unknown>): GuideDeck | null {
+  const requestedId = typeof args.guide_id === 'string' ? args.guide_id.trim() : '';
+  if (requestedId) {
+    return getGuideForDomain(domainId, requestedId);
+  }
+
+  const query = typeof args.query === 'string' && args.query.trim() ? args.query.trim() : userText;
+  const candidates = searchGuidesForDomain(domainId, query);
+  return candidates[0] || getGuidesForDomain(domainId)[0] || null;
+}
+
+function executeGuideTool(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+  userText: string;
+  domainId: string;
+  requestId: string;
+  sessionId?: string;
+  userId?: string;
+  attachedPackIds?: string[];
+}): MCPExecutionResult {
+  const { toolName, args, userText, domainId } = input;
+  const normalizedArgs = normalizeToolArguments(toolName, args, userText);
+  const guides = getGuidesForDomain(domainId);
+
+  if (!domainId) {
+    return {
+      success: false,
+      serverId: 'guide',
+      serverName: 'Guide MCP',
+      toolName,
+      error: 'domain_id is required',
+      errorCode: 'TOOL_SELECTION_NO_MATCH',
+    };
+  }
+
+  if (toolName === 'guide_list') {
+    const output = JSON.stringify({
+      type: 'guide.list',
+      domain_id: domainId,
+      guides: guides.map(summarizeGuide),
+    }, null, 2);
+    return { success: true, serverId: 'guide', serverName: 'Guide MCP', toolName, output, errorCode: 'NONE' };
+  }
+
+  if (toolName === 'guide_search') {
+    const query = typeof normalizedArgs.query === 'string' ? normalizedArgs.query : userText;
+    const results = searchGuidesForDomain(domainId, query);
+    const output = JSON.stringify({
+      type: 'guide.search',
+      domain_id: domainId,
+      query,
+      guides: results.map(summarizeGuide),
+    }, null, 2);
+    return { success: true, serverId: 'guide', serverName: 'Guide MCP', toolName, output, errorCode: 'NONE' };
+  }
+
+  if (toolName === 'guide_get') {
+    const guideId = typeof normalizedArgs.guide_id === 'string' ? normalizedArgs.guide_id : '';
+    const guide = guideId ? getGuideForDomain(domainId, guideId) : null;
+    if (!guide) {
+      return {
+        success: false,
+        serverId: 'guide',
+        serverName: 'Guide MCP',
+        toolName,
+        error: 'Guide not found or not attached to domain',
+        errorCode: 'MCP_CALL_ERROR',
+      };
+    }
+
+    return {
+      success: true,
+      serverId: 'guide',
+      serverName: 'Guide MCP',
+      toolName,
+      output: JSON.stringify({ type: 'guide.get', domain_id: domainId, guide }, null, 2),
+      errorCode: 'NONE',
+    };
+  }
+
+  if (toolName === 'guide_start') {
+    const guide = pickGuideForStart(domainId, userText, normalizedArgs);
+    if (!guide) {
+      return {
+        success: false,
+        serverId: 'guide',
+        serverName: 'Guide MCP',
+        toolName,
+        error: 'No attached guide found for this domain',
+        errorCode: 'MCP_CALL_ERROR',
+      };
+    }
+
+    const guideAction: GuideAction = {
+      type: 'start',
+      domainId,
+      guideId: guide.deck_id,
+      guide,
+    };
+    return {
+      success: true,
+      serverId: 'guide',
+      serverName: 'Guide MCP',
+      toolName,
+      output: JSON.stringify({
+        type: 'guide.start',
+        domain_id: domainId,
+        guide_id: guide.deck_id,
+        title: guide.title,
+        slide_count: guide.slides.length,
+      }, null, 2),
+      guideAction,
+      errorCode: 'NONE',
+    };
+  }
+
+  return {
+    success: false,
+    serverId: 'guide',
+    serverName: 'Guide MCP',
+    toolName,
+    error: `Unknown guide tool: ${toolName}`,
+    errorCode: 'TOOL_NOT_IMPLEMENTED',
+  };
 }
 
 function toToolNameList(listToolsResult: unknown): string[] {
@@ -1833,6 +2056,7 @@ async function callServerTool(
 export async function executeMCPForDomain(input: {
   mcpServerIds?: string[];
   userText: string;
+  domainId?: string;
   requestId: string;
   sessionId?: string;
   userId?: string;
@@ -1848,6 +2072,47 @@ export async function executeMCPForDomain(input: {
     const server = getMCPServerById(id);
 
     if (!server || !server.enabled) {
+      continue;
+    }
+
+    if (server.id === 'guide') {
+      const decision = selectGuideTool(userText);
+      if (!decision) {
+        continue;
+      }
+
+      const result = executeGuideTool({
+        toolName: decision.name,
+        args: decision.args,
+        userText,
+        domainId: input.domainId || '',
+        requestId: input.requestId,
+        sessionId: input.sessionId,
+        userId: input.userId,
+        attachedPackIds: input.attachedPackIds,
+      });
+
+      writeMCPAuditLog({
+        requestId: input.requestId,
+        sessionId: input.sessionId,
+        userId: input.userId,
+        attachedPackIds: input.attachedPackIds,
+        toolName: result.toolName || decision.name,
+        success: result.success,
+        errorCode: result.errorCode || 'NONE',
+        output: result.output,
+      });
+
+      setMCPServerRuntimeStatus(server.id, {
+        success: result.success,
+        toolName: result.toolName,
+        error: result.error,
+      });
+
+      if (result.success) {
+        return result;
+      }
+
       continue;
     }
 

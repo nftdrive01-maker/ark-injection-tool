@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { getDomainById } from './domains';
 
 export type GuideSlideType = 'web' | 'image' | 'qa';
 
@@ -187,6 +188,42 @@ export function getAllGuides(): GuideDeck[] {
 
 export function getGuideById(id: string): GuideDeck | null {
   return getAllGuides().find((guide) => guide.deck_id === id) || null;
+}
+
+export function getGuidesForDomain(domainId: string): GuideDeck[] {
+  const domain = getDomainById(domainId);
+  const attachedGuideIds = Array.isArray(domain?.attachedGuideIds) ? domain.attachedGuideIds : [];
+  if (attachedGuideIds.length === 0) {
+    return [];
+  }
+
+  const attachedSet = new Set(attachedGuideIds);
+  return getAllGuides().filter((guide) => attachedSet.has(guide.deck_id));
+}
+
+export function getGuideForDomain(domainId: string, guideId: string): GuideDeck | null {
+  return getGuidesForDomain(domainId).find((guide) => guide.deck_id === guideId) || null;
+}
+
+export function searchGuidesForDomain(domainId: string, query: string): GuideDeck[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  const guides = getGuidesForDomain(domainId);
+  if (!normalizedQuery) {
+    return guides;
+  }
+
+  const terms = normalizedQuery.split(/\s+/).filter(Boolean);
+  return guides.filter((guide) => {
+    const haystack = [
+      guide.deck_id,
+      guide.title,
+      guide.description,
+      ...(guide.tags || []),
+      ...(guide.slides || []).flatMap((slide) => [slide.title || '', slide.url || '', slide.notes || '']),
+    ].join('\n').toLowerCase();
+
+    return terms.every((term) => haystack.includes(term));
+  });
 }
 
 export function createGuide(input: Partial<GuideDeck>): GuideDeck {

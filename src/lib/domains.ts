@@ -69,6 +69,7 @@ export interface Domain {
   imageAvatarTalkIntervalMs?: number;
   knowledgeIds: string[];
   mcpServerIds?: string[];
+  attachedGuideIds?: string[];
   chronicleIds?: string[];
   memoryIds?: string[];
   version: string;
@@ -240,6 +241,7 @@ function loadStoreFromFile(): KnowledgeDomainStore {
           ...domain,
           accessControlEnabled: domain.accessControlEnabled === true,
           accessUsers: normalizeStoredAccessUsers(domain.accessUsers),
+          attachedGuideIds: Array.isArray(domain.attachedGuideIds) ? domain.attachedGuideIds : [],
           chronicleIds: Array.isArray(domain.chronicleIds) ? domain.chronicleIds : [],
         })),
         chronicles: Array.isArray(parsed.chronicles) ? parsed.chronicles as Chronicle[] : [],
@@ -299,6 +301,7 @@ function migrateLegacyDomains(legacyDomains: Array<{
     headerImageUrl: '',
     knowledgeIds: [`${domain.id}_knowledge`],
     mcpServerIds: [],
+    attachedGuideIds: [],
     chronicleIds: [],
     memoryIds: [],
     ttsBackend: '',
@@ -356,6 +359,7 @@ function getDefaultStore(): KnowledgeDomainStore {
       gazeWakeEnabled: false,
       knowledgeIds: [sanitizeId(DEFAULT_KNOWLEDGE_ID, 'default_knowledge')],
       mcpServerIds: [],
+      attachedGuideIds: [],
       chronicleIds: [],
       memoryIds: [],
       version: '1.0.0',
@@ -481,6 +485,9 @@ export function updateDomain(id: string, updates: Partial<Domain>): ResolvedDoma
     knowledgeIds: Array.isArray(updates.knowledgeIds)
       ? updates.knowledgeIds
       : store.domains[index].knowledgeIds,
+    attachedGuideIds: Array.isArray(updates.attachedGuideIds)
+      ? updates.attachedGuideIds
+      : (store.domains[index].attachedGuideIds || []),
     chronicleIds: Array.isArray(updates.chronicleIds)
       ? updates.chronicleIds
       : (store.domains[index].chronicleIds || []),
@@ -630,6 +637,7 @@ export function createDomain(input: {
   stylebertvits2Style?: string;
   knowledgeIds?: string[];
   mcpServerIds?: string[];
+  attachedGuideIds?: string[];
   chronicleIds?: string[];
   memoryIds?: string[];
   ttl?: number;
@@ -716,6 +724,7 @@ export function createDomain(input: {
     stylebertvits2Style: input.stylebertvits2Style || '',
     knowledgeIds,
     mcpServerIds: Array.isArray(input.mcpServerIds) ? input.mcpServerIds : [],
+    attachedGuideIds: Array.isArray(input.attachedGuideIds) ? input.attachedGuideIds : [],
     chronicleIds: Array.isArray(input.chronicleIds) ? input.chronicleIds : [],
     memoryIds: Array.isArray(input.memoryIds) ? input.memoryIds : [],
     version: '1.0.0',
@@ -756,6 +765,7 @@ export function getDomainOptions(): Array<{
   accessControlEnabled?: boolean;
   knowledgeIds?: string[];
   mcpServerIds?: string[];
+  attachedGuideIds?: string[];
   bgUrl?: string;
   headerImageUrl?: string;
   themeColor?: string;
@@ -792,6 +802,7 @@ export function getDomainOptions(): Array<{
     accessControlEnabled: domain.accessControlEnabled === true,
     knowledgeIds: Array.isArray(domain.knowledgeIds) ? domain.knowledgeIds : [],
     mcpServerIds: Array.isArray(domain.mcpServerIds) ? domain.mcpServerIds : [],
+    attachedGuideIds: Array.isArray(domain.attachedGuideIds) ? domain.attachedGuideIds : [],
     bgUrl: domain.bgUrl || '',
     headerImageUrl: domain.headerImageUrl || '',
     themeColor: sanitizeThemeColor(domain.themeColor),
@@ -1047,6 +1058,9 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
     imageAvatarTalkIntervalMs: typeof item.imageAvatarTalkIntervalMs === 'number' ? item.imageAvatarTalkIntervalMs : undefined,
     knowledgeIds: Array.isArray(item.knowledgeIds)
       ? item.knowledgeIds.filter((id): id is string => typeof id === 'string')
+      : [],
+    attachedGuideIds: Array.isArray(item.attachedGuideIds)
+      ? item.attachedGuideIds.filter((id): id is string => typeof id === 'string')
       : [],
     chronicleIds: Array.isArray(item.chronicleIds)
       ? item.chronicleIds.filter((id): id is string => typeof id === 'string')
