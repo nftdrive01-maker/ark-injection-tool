@@ -408,7 +408,7 @@ type WebSearchPayload = {
   notes?: string[];
 };
 
-function parseWebSearchOutput(output: string): WebSearchPayload | null {
+export function parseWebSearchOutput(output: string): WebSearchPayload | null {
   if (!output) {
     return null;
   }
@@ -453,7 +453,7 @@ function parseWebSearchOutput(output: string): WebSearchPayload | null {
   }
 }
 
-function formatWebSearchPayloadForPrompt(payload: WebSearchPayload): string {
+export function formatWebSearchPayloadForPrompt(payload: WebSearchPayload): string {
   const lines: string[] = ['[WEB????]'];
 
   if (payload.query) {
@@ -701,25 +701,7 @@ ${knowledge.context || ''}
     : undefined;
 
 
-  const isWebSearchMcp = mcpResult?.success
-    && mcpResult.serverId === 'mcp'
-    && mcpResult.toolName === 'search_web';
   let injectedUserContext = '';
-
-  if (mcpResult?.success && mcpResult.output) {
-    const forceVerbatimAuthOutput = isGoogleAuthRequiredOutput(mcpResult.output);
-    const compactDbContext = formatDbResultForPrompt(dbResultPayload);
-    const reactionPrompt = buildMcpReactionPrompt({
-      userText,
-      serverId: mcpResult.serverId,
-      toolName: mcpResult.toolName,
-      dbResult: dbResultPayload,
-    });
-
-    if (reactionPrompt) {
-      injectedSystemPrompt += reactionPrompt;
-    }
-
 
   if (mcpResult?.success && mcpResult.output) {
     const forceVerbatimAuthOutput = isGoogleAuthRequiredOutput(mcpResult.output);
@@ -939,6 +921,4 @@ ${sourceBlock}
   }
 
   return response;
-}
-
 }
