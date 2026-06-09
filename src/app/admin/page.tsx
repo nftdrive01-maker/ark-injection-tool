@@ -79,6 +79,31 @@ interface Knowledge {
   updatedAt: string;
 }
 
+type GuideSlideType = 'web' | 'image' | 'qa';
+
+interface GuideSlide {
+  slide_no: number;
+  type: GuideSlideType;
+  title?: string;
+  url?: string;
+  display_seconds?: number;
+  notes: string;
+}
+
+interface GuideDeck {
+  deck_id: string;
+  version: string;
+  title: string;
+  description: string;
+  tags: string[];
+  slides: GuideSlide[];
+  qa_context?: {
+    enabled: boolean;
+    source: string;
+  };
+  updatedAt?: string;
+}
+
 interface Memory {
   id: string | number;
   name: string;
@@ -275,6 +300,7 @@ interface MCPServer {
 }
 
 type AssetType = 'vrm' | 'bgimage';
+type AdminTab = 'domain' | 'shared-log' | 'knowledge' | 'guide' | 'chronicle' | 'asset' | 'pronunciation' | 'public' | 'mcp';
 
 const DEFAULT_GAZE_GREETINGS = [
   '何か御用がありますか？',
@@ -290,6 +316,7 @@ const SESSION_AUTH_PLACEHOLDER = 'cookie-session';
 const SHARED_LOG_ALL_DOMAINS = '__all__';
 const SHARED_LOG_ALL_USERS = '__all__';
 const SHARED_LOG_ALL_SESSIONS = '__all__';
+const DEFAULT_GUIDE_SLIDE_SECONDS = 10;
 const LATIN_WORD_PATTERN = /https?:\/\/\S+|www\.\S+|[A-Za-z][A-Za-z'-]*/g;
 
 interface DomainPromptTemplate {
@@ -300,6 +327,54 @@ interface DomainPromptTemplate {
 }
 
 type DomainSubTab = 'basic' | 'prompt' | 'experience' | 'connections' | 'test';
+
+function createDefaultGuideDeck(index = 1): GuideDeck {
+  return {
+    deck_id: `ark_i_guide_${index}`,
+    version: '0.1.0',
+    title: 'Ark-i Webデモ',
+    description: 'Webページを表示しながらArk-iが説明する3ページ構成のデモ',
+    tags: ['Ark-i', 'Webデモ', '展示会', '説明会'],
+    slides: [
+      {
+        slide_no: 1,
+        type: 'web',
+        url: 'https://ark-i.nftdrive.net',
+        display_seconds: DEFAULT_GUIDE_SLIDE_SECONDS,
+        notes: 'こちらがArk-iのランディングページです。Ark-iは、現場ごとのドメインに応じてAIコンシェルジュを切り替えられる仕組みです。',
+      },
+      {
+        slide_no: 2,
+        type: 'image',
+        url: 'https://ark-i.nftdrive.net/img/screenshot1.png',
+        display_seconds: DEFAULT_GUIDE_SLIDE_SECONDS,
+        notes: 'この図はArk-iの基本構成です。Amicaがユーザーインターフェースを担当し、BEYOND-CoreがMCPや外部サービスとの接続を担当します。',
+      },
+      {
+        slide_no: 3,
+        type: 'qa',
+        title: '質疑応答',
+        display_seconds: DEFAULT_GUIDE_SLIDE_SECONDS,
+        notes: '以上で説明は終了です。ここからは、Ark-iについてご質問ください。',
+      },
+    ],
+    qa_context: {
+      enabled: true,
+      source: 'slides_and_notes',
+    },
+  };
+}
+
+function guideTagsToInput(tags: string[] | undefined): string {
+  return Array.isArray(tags) ? tags.join(', ') : '';
+}
+
+function guideInputToTags(input: string): string[] {
+  return input
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
 
 const DOMAIN_PROMPT_TEMPLATES: DomainPromptTemplate[] = [
   {
@@ -439,10 +514,15 @@ export default function AdminPage() {
   const [pronunciationSettings, setPronunciationSettings] = useState<PronunciationSettings>({
     wanaKanaEnabled: false,
   });
-  const [activeTab, setActiveTab] = useState<'domain' | 'shared-log' | 'knowledge' | 'chronicle' | 'asset' | 'pronunciation' | 'public' | 'mcp'>('domain');
+  const [activeTab, setActiveTab] = useState<AdminTab>('domain');
   const [activeDomainSubTab, setActiveDomainSubTab] = useState<DomainSubTab>('basic');
   const [selectedDomain, setSelectedDomain] = useState<Domain | null>(null);
   const [selectedKnowledge, setSelectedKnowledge] = useState<Knowledge | null>(null);
+  const [guides, setGuides] = useState<GuideDeck[]>([]);
+  const [selectedGuide, setSelectedGuide] = useState<GuideDeck | null>(null);
+  const [guideTagsInput, setGuideTagsInput] = useState('');
+  const [guideJsonImportInput, setGuideJsonImportInput] = useState('');
+  const [savingGuide, setSavingGuide] = useState(false);
   const [chronicles, setChronicles] = useState<Chronicle[]>([]);
   const [selectedChronicle, setSelectedChronicle] = useState<Chronicle | null>(null);
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -781,11 +861,14 @@ export default function AdminPage() {
   );
 
   const loadAllData = async (token: string) => {
-    const [domainsRes, knowledgesRes, chroniclesRes, pronunciationsRes, pronunciationSettingsRes, memoriesRes] = await Promise.all([
+    const [domainsRes, knowledgesRes, guidesRes, chroniclesRes, pronunciationsRes, pronunciationSettingsRes, memoriesRes] = await Promise.all([
       fetch('/api/domains', {
         headers: { Authorization: `Bearer ${token}` },
       }),
       fetch('/api/knowledges', {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      fetch('/api/guides', {
         headers: { Authorization: `Bearer ${token}` },
       }),
       fetch('/api/chronicles', {
@@ -824,6 +907,15 @@ export default function AdminPage() {
       }
     }
 
+    if (guidesRes.ok) {
+      const guideData = await guidesRes.json();
+      setGuides(Array.isArray(guideData) ? guideData : []);
+      if (Array.isArray(guideData) && guideData.length > 0) {
+        setSelectedGuide(guideData[0]);
+        setGuideTagsInput(guideTagsToInput(guideData[0].tags));
+      }
+    }
+
     if (chroniclesRes.ok) {
       const chronicleData = await chroniclesRes.json();
       setChronicles(chronicleData);
@@ -856,6 +948,7 @@ export default function AdminPage() {
     if (
       handleUnauthorizedResponse(domainsRes.status) ||
       handleUnauthorizedResponse(knowledgesRes.status) ||
+      handleUnauthorizedResponse(guidesRes.status) ||
       handleUnauthorizedResponse(chroniclesRes.status) ||
       handleUnauthorizedResponse(pronunciationsRes.status) ||
       handleUnauthorizedResponse(pronunciationSettingsRes.status) ||
@@ -2593,6 +2686,120 @@ export default function AdminPage() {
     setMcpAiAllowedToolsError(validateAllowedTools(normalizedTools));
   }, [selectedMcpServer?.id]);
 
+  useEffect(() => {
+    setGuideTagsInput(guideTagsToInput(selectedGuide?.tags));
+  }, [selectedGuide?.deck_id]);
+
+  const refreshGuides = async (token: string, preferredId?: string) => {
+    const response = await fetch('/api/guides', {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+
+    if (handleUnauthorizedResponse(response.status)) {
+      return;
+    }
+
+    if (!response.ok) {
+      setMessage('ガイド一覧の再取得に失敗しました');
+      return;
+    }
+
+    const guideData = await response.json();
+    const nextGuides = Array.isArray(guideData) ? guideData : [];
+    setGuides(nextGuides);
+    if (nextGuides.length === 0) {
+      setSelectedGuide(null);
+      return;
+    }
+
+    const nextSelected = nextGuides.find((guide: GuideDeck) => guide.deck_id === preferredId) || nextGuides[0];
+    setSelectedGuide(nextSelected);
+  };
+
+  const updateSelectedGuide = (patch: Partial<GuideDeck>) => {
+    if (!selectedGuide) {
+      return;
+    }
+
+    setSelectedGuide({
+      ...selectedGuide,
+      ...patch,
+    });
+  };
+
+  const updateSelectedGuideSlide = (index: number, patch: Partial<GuideSlide>) => {
+    if (!selectedGuide) {
+      return;
+    }
+
+    const slides = selectedGuide.slides.map((slide, slideIndex) => (
+      slideIndex === index
+        ? { ...slide, ...patch }
+        : slide
+    ));
+
+    setSelectedGuide({
+      ...selectedGuide,
+      slides,
+    });
+  };
+
+  const addGuideSlide = () => {
+    if (!selectedGuide) {
+      return;
+    }
+
+    const nextSlide: GuideSlide = {
+      slide_no: selectedGuide.slides.length + 1,
+      type: 'qa',
+      title: '新しいページ',
+      display_seconds: DEFAULT_GUIDE_SLIDE_SECONDS,
+      notes: '',
+    };
+
+    setSelectedGuide({
+      ...selectedGuide,
+      slides: [...selectedGuide.slides, nextSlide],
+    });
+  };
+
+  const deleteGuideSlide = (index: number) => {
+    if (!selectedGuide || selectedGuide.slides.length <= 1) {
+      return;
+    }
+
+    const slides = selectedGuide.slides
+      .filter((_, slideIndex) => slideIndex !== index)
+      .map((slide, slideIndex) => ({
+        ...slide,
+        slide_no: slideIndex + 1,
+      }));
+
+    setSelectedGuide({
+      ...selectedGuide,
+      slides,
+    });
+  };
+
+  const buildGuidePayload = (guide: GuideDeck): GuideDeck => ({
+    ...guide,
+    tags: guideInputToTags(guideTagsInput),
+    slides: guide.slides.map((slide, index) => ({
+      ...slide,
+      slide_no: index + 1,
+      display_seconds: Math.max(1, Math.floor(Number(slide.display_seconds) || DEFAULT_GUIDE_SLIDE_SECONDS)),
+    })),
+    qa_context: {
+      enabled: guide.qa_context?.enabled === true,
+      source: guide.qa_context?.source || 'slides_and_notes',
+    },
+  });
+
+  const guideJsonPreview = selectedGuide
+    ? JSON.stringify(buildGuidePayload(selectedGuide), null, 2)
+    : '';
+
   const handleSave = async () => {
     if (!selectedDomain) return;
 
@@ -2811,6 +3018,179 @@ export default function AdminPage() {
       setMessage('ナレッジ削除時にエラーが発生しました');
       console.error(err);
     }
+  };
+
+  const handleSaveGuide = async () => {
+    if (!selectedGuide) {
+      return;
+    }
+
+    setSavingGuide(true);
+    setMessage('');
+
+    try {
+      const token = localStorage.getItem('injection_token');
+      const payload = buildGuidePayload(selectedGuide);
+      const guideExists = guides.some((guide) => guide.deck_id === selectedGuide.deck_id);
+      const res = await fetch(guideExists ? `/api/guides/${selectedGuide.deck_id}` : '/api/guides', {
+        method: guideExists ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (handleUnauthorizedResponse(res.status)) {
+        return;
+      }
+
+      if (res.ok) {
+        const updated = await res.json();
+        setGuides((prev) => (
+          guideExists
+            ? prev.map((guide) => (guide.deck_id === updated.deck_id ? updated : guide))
+            : [...prev, updated]
+        ));
+        setSelectedGuide(updated);
+        setMessage('ガイドを保存しました');
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        const error = await res.json().catch(() => null);
+        setMessage(error?.error || 'ガイド保存に失敗しました');
+      }
+    } catch (err) {
+      console.error(err);
+      setMessage('ガイド保存時にエラーが発生しました');
+    } finally {
+      setSavingGuide(false);
+    }
+  };
+
+  const handleCreateGuide = async () => {
+    try {
+      const token = localStorage.getItem('injection_token');
+      const payload = createDefaultGuideDeck(guides.length + 1);
+      const res = await fetch('/api/guides', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (handleUnauthorizedResponse(res.status)) {
+        return;
+      }
+
+      if (res.ok) {
+        const created = await res.json();
+        setGuides((prev) => [...prev, created]);
+        setSelectedGuide(created);
+        setMessage('ガイドを追加しました');
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        const error = await res.json().catch(() => null);
+        setMessage(error?.error || 'ガイド追加に失敗しました');
+      }
+    } catch (err) {
+      console.error(err);
+      setMessage('ガイド追加時にエラーが発生しました');
+    }
+  };
+
+  const handleDeleteGuide = async () => {
+    if (!selectedGuide) {
+      return;
+    }
+
+    if (!window.confirm(`ガイド「${selectedGuide.title}」を削除しますか？`)) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('injection_token');
+      const res = await fetch(`/api/guides/${selectedGuide.deck_id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (handleUnauthorizedResponse(res.status)) {
+        return;
+      }
+
+      if (res.ok) {
+        await refreshGuides(token || '');
+        setMessage('ガイドを削除しました');
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        const error = await res.json().catch(() => null);
+        setMessage(error?.error || 'ガイド削除に失敗しました');
+      }
+    } catch (err) {
+      console.error(err);
+      setMessage('ガイド削除時にエラーが発生しました');
+    }
+  };
+
+  const handleImportGuideJson = () => {
+    if (!guideJsonImportInput.trim()) {
+      setMessage('取り込むJSONを入力してください');
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(guideJsonImportInput);
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.slides)) {
+        setMessage('ガイドJSONには slides 配列が必要です');
+        return;
+      }
+
+      const nextGuide = {
+        ...createDefaultGuideDeck(guides.length + 1),
+        ...parsed,
+        deck_id: typeof parsed.deck_id === 'string' && parsed.deck_id.trim()
+          ? parsed.deck_id.trim()
+          : selectedGuide?.deck_id || `ark_i_guide_${guides.length + 1}`,
+        slides: parsed.slides.map((slide: Partial<GuideSlide>, index: number) => ({
+          slide_no: index + 1,
+          type: slide.type === 'web' || slide.type === 'image' || slide.type === 'qa' ? slide.type : 'qa',
+          title: typeof slide.title === 'string' ? slide.title : '',
+          url: typeof slide.url === 'string' ? slide.url : '',
+          display_seconds: Math.max(1, Math.floor(Number(slide.display_seconds) || DEFAULT_GUIDE_SLIDE_SECONDS)),
+          notes: typeof slide.notes === 'string' ? slide.notes : '',
+        })),
+      } as GuideDeck;
+
+      setSelectedGuide(nextGuide);
+      setGuideTagsInput(guideTagsToInput(nextGuide.tags));
+      setGuideJsonImportInput('');
+      setMessage('JSONをフォームへ反映しました。保存すると管理データへ登録されます。');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      console.error(err);
+      setMessage('JSONの解析に失敗しました');
+    }
+  };
+
+  const handleDownloadGuideJson = () => {
+    if (!selectedGuide) {
+      return;
+    }
+
+    const payload = buildGuidePayload(selectedGuide);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${payload.deck_id || 'guide'}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleCreatePronunciation = async () => {
@@ -3507,6 +3887,22 @@ export default function AdminPage() {
               }}
             >
               ナレッジ管理
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('guide')}
+              style={{
+                padding: '8px 14px',
+                backgroundColor: activeTab === 'guide' ? '#0066cc' : '#f0f0f0',
+                color: activeTab === 'guide' ? 'white' : '#000',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: activeTab === 'guide' ? 'bold' : 'normal',
+              }}
+            >
+              ガイド管理
             </button>
 
             <button
@@ -6044,6 +6440,374 @@ export default function AdminPage() {
                 </form>
               ) : (
                 <p>ナレッジを選択してください</p>
+              )}
+            </main>
+          </>
+        ) : activeTab === 'guide' ? (
+          <>
+            <aside style={{ borderRight: '1px solid #ddd', paddingRight: '20px' }}>
+              <h3>ガイド一覧</h3>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                <button
+                  type="button"
+                  onClick={handleCreateGuide}
+                  style={{
+                    padding: '6px 10px',
+                    backgroundColor: '#4caf50',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  ＋追加
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteGuide}
+                  disabled={!selectedGuide}
+                  style={{
+                    padding: '6px 10px',
+                    backgroundColor: !selectedGuide ? '#ccc' : '#ef5350',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: !selectedGuide ? 'default' : 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  削除
+                </button>
+              </div>
+
+              {guides.length === 0 ? (
+                <p>ガイドがありません</p>
+              ) : (
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {guides.map((guide) => (
+                    <li key={guide.deck_id} style={{ marginBottom: '8px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedGuide(guide)}
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          border: 'none',
+                          borderRadius: '4px',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          backgroundColor: selectedGuide?.deck_id === guide.deck_id ? '#0066cc' : '#f0f0f0',
+                          color: selectedGuide?.deck_id === guide.deck_id ? 'white' : 'black',
+                        }}
+                      >
+                        <div style={{ fontWeight: 'bold' }}>{guide.title}</div>
+                        <div style={{ fontSize: '12px', opacity: 0.8 }}>{guide.deck_id}</div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </aside>
+
+            <main>
+              <h2 style={{ marginTop: 0 }}>ガイド管理</h2>
+              <p style={{ color: '#555', marginTop: 0, lineHeight: 1.7 }}>
+                Amica のpresentationモードで読み込むDeck JSONを作成します。Web、画像、QAページを並べ、各ページの表示時間と読み上げ文を設定できます。
+              </p>
+
+              {selectedGuide ? (
+                <div style={{ display: 'grid', gap: '16px' }}>
+                  <section style={{ padding: '16px', border: '1px solid #c7d2fe', borderRadius: '8px', backgroundColor: '#f5f7ff' }}>
+                    <h3 style={{ marginTop: 0 }}>基本情報</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: '12px', marginBottom: '12px' }}>
+                      <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                        タイトル
+                        <input
+                          type="text"
+                          value={selectedGuide.title}
+                          onChange={(e) => updateSelectedGuide({ title: e.target.value })}
+                          style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                        version
+                        <input
+                          type="text"
+                          value={selectedGuide.version}
+                          onChange={(e) => updateSelectedGuide({ version: e.target.value })}
+                          style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                        />
+                      </label>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                      <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                        deck_id
+                        <input
+                          type="text"
+                          value={selectedGuide.deck_id}
+                          onChange={(e) => updateSelectedGuide({ deck_id: e.target.value })}
+                          style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', fontFamily: 'monospace' }}
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                        タグ（カンマ区切り）
+                        <input
+                          type="text"
+                          value={guideTagsInput}
+                          onChange={(e) => setGuideTagsInput(e.target.value)}
+                          placeholder="Ark-i, Webデモ, 展示会"
+                          style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                        />
+                      </label>
+                    </div>
+
+                    <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                      説明
+                      <textarea
+                        value={selectedGuide.description}
+                        onChange={(e) => updateSelectedGuide({ description: e.target.value })}
+                        rows={2}
+                        style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', resize: 'vertical' }}
+                      />
+                    </label>
+
+                    <div style={{ display: 'flex', gap: '16px', marginTop: '12px', flexWrap: 'wrap' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedGuide.qa_context?.enabled === true}
+                          onChange={(e) =>
+                            updateSelectedGuide({
+                              qa_context: {
+                                enabled: e.target.checked,
+                                source: selectedGuide.qa_context?.source || 'slides_and_notes',
+                              },
+                            })
+                          }
+                        />
+                        QA contextを有効化
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
+                        source
+                        <input
+                          type="text"
+                          value={selectedGuide.qa_context?.source || 'slides_and_notes'}
+                          onChange={(e) =>
+                            updateSelectedGuide({
+                              qa_context: {
+                                enabled: selectedGuide.qa_context?.enabled === true,
+                                source: e.target.value,
+                              },
+                            })
+                          }
+                          style={{ padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                        />
+                      </label>
+                    </div>
+                  </section>
+
+                  <section style={{ padding: '16px', border: '1px solid #b3e5fc', borderRadius: '8px', backgroundColor: '#f3fbff' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '12px' }}>
+                      <div>
+                        <h3 style={{ margin: 0 }}>ページ編集</h3>
+                        <div style={{ color: '#64748b', fontSize: '13px', marginTop: '4px' }}>
+                          display_seconds 未指定時はAmica側で10秒として扱います。ここでは明示値を保存します。
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addGuideSlide}
+                        style={{
+                          padding: '8px 12px',
+                          backgroundColor: '#0288d1',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        ページ追加
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'grid', gap: '12px' }}>
+                      {selectedGuide.slides.map((slide, index) => (
+                        <article key={`${slide.slide_no}-${index}`} style={{ padding: '14px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '10px' }}>
+                            <strong>ページ {index + 1}</strong>
+                            <button
+                              type="button"
+                              onClick={() => deleteGuideSlide(index)}
+                              disabled={selectedGuide.slides.length <= 1}
+                              style={{
+                                padding: '6px 10px',
+                                backgroundColor: selectedGuide.slides.length <= 1 ? '#ccc' : '#ef5350',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: selectedGuide.slides.length <= 1 ? 'default' : 'pointer',
+                              }}
+                            >
+                              削除
+                            </button>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 140px', gap: '10px', marginBottom: '10px' }}>
+                            <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                              type
+                              <select
+                                value={slide.type}
+                                onChange={(e) => updateSelectedGuideSlide(index, { type: e.target.value as GuideSlideType })}
+                                style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                              >
+                                <option value="web">web</option>
+                                <option value="image">image</option>
+                                <option value="qa">qa</option>
+                              </select>
+                            </label>
+                            <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                              title
+                              <input
+                                type="text"
+                                value={slide.title || ''}
+                                onChange={(e) => updateSelectedGuideSlide(index, { title: e.target.value })}
+                                placeholder="任意"
+                                style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                              />
+                            </label>
+                            <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                              表示秒数
+                              <input
+                                type="number"
+                                min={1}
+                                step={1}
+                                value={slide.display_seconds || DEFAULT_GUIDE_SLIDE_SECONDS}
+                                onChange={(e) =>
+                                  updateSelectedGuideSlide(index, {
+                                    display_seconds: Math.max(1, Math.floor(Number(e.target.value) || DEFAULT_GUIDE_SLIDE_SECONDS)),
+                                  })
+                                }
+                                style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                              />
+                            </label>
+                          </div>
+
+                          <label style={{ display: 'grid', gap: '4px', fontWeight: 600, marginBottom: '10px' }}>
+                            URL（web/imageページで使用）
+                            <input
+                              type="url"
+                              value={slide.url || ''}
+                              onChange={(e) => updateSelectedGuideSlide(index, { url: e.target.value })}
+                              placeholder="https://example.com"
+                              style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                            />
+                          </label>
+
+                          <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                            読み上げノート
+                            <textarea
+                              value={slide.notes}
+                              onChange={(e) => updateSelectedGuideSlide(index, { notes: e.target.value })}
+                              rows={4}
+                              placeholder="このページでAmicaに読み上げさせる内容"
+                              style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', resize: 'vertical', lineHeight: 1.6 }}
+                            />
+                          </label>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    <div style={{ padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
+                      <h3 style={{ marginTop: 0 }}>JSON取り込み</h3>
+                      <textarea
+                        value={guideJsonImportInput}
+                        onChange={(e) => setGuideJsonImportInput(e.target.value)}
+                        rows={12}
+                        placeholder="既存のDeck JSONを貼り付け"
+                        style={{ width: '100%', boxSizing: 'border-box', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', fontFamily: 'monospace', fontSize: '12px' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleImportGuideJson}
+                        style={{
+                          marginTop: '10px',
+                          padding: '8px 12px',
+                          backgroundColor: '#0f766e',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        JSONをフォームへ反映
+                      </button>
+                    </div>
+
+                    <div style={{ padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                        <h3 style={{ margin: 0 }}>JSONプレビュー</h3>
+                        <button
+                          type="button"
+                          onClick={handleDownloadGuideJson}
+                          style={{
+                            padding: '6px 10px',
+                            backgroundColor: '#334155',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                          }}
+                        >
+                          ダウンロード
+                        </button>
+                      </div>
+                      <pre style={{ margin: 0, maxHeight: '360px', overflow: 'auto', padding: '12px', borderRadius: '6px', backgroundColor: '#0f172a', color: '#e2e8f0', fontSize: '12px', lineHeight: 1.6 }}>
+                        {guideJsonPreview}
+                      </pre>
+                    </div>
+                  </section>
+
+                  {message && (
+                    <div
+                      style={{
+                        padding: '10px',
+                        backgroundColor: message.includes('失敗') ? '#ffebee' : '#e8f5e9',
+                        color: message.includes('失敗') ? '#c62828' : '#2e7d32',
+                        borderRadius: '4px',
+                      }}
+                    >
+                      {message}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={handleSaveGuide}
+                      disabled={savingGuide}
+                      style={{
+                        padding: '10px 20px',
+                        backgroundColor: savingGuide ? '#ccc' : '#4caf50',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: savingGuide ? 'default' : 'pointer',
+                        fontWeight: 'bold',
+                      }}
+                    >
+                      {savingGuide ? '保存中...' : 'ガイド保存'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p>ガイドを選択してください</p>
               )}
             </main>
           </>
