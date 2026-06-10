@@ -20,7 +20,11 @@
           "display_seconds": 20,
           "notes": "こちらがArk-iのランディングページです。Ark-iは、現場ごとのドメインに応じてAIコンシェルジュを切り替えられる仕組みです。",
           "qa": {
-            "keywords": [],
+            "keywords": [
+              "1ページ",
+              "ランディングページ",
+              "最初のページ"
+            ],
             "context": ""
           }
         },
@@ -32,7 +36,11 @@
           "display_seconds": 20,
           "notes": "この図はArk-iの基本構成です。Amicaがユーザーインターフェースを担当し、BEYOND-CoreがMCPや外部サービスとの接続を担当します。",
           "qa": {
-            "keywords": [],
+            "keywords": [
+              "基本構成",
+              "ユーザーインターフェース",
+              "UI"
+            ],
             "context": ""
           }
         },
@@ -44,7 +52,9 @@
           "display_seconds": 20,
           "notes": "以上で説明は終了です。ここからは、Ark-iについてご質問ください。",
           "qa": {
-            "keywords": [],
+            "keywords": [
+              "最後のページ"
+            ],
             "context": ""
           }
         }
@@ -54,11 +64,11 @@
         "source": "slides_and_notes"
       },
       "after_guide": {
-        "mode": "loop",
+        "mode": "qa",
         "qa_behavior": "jump_to_related_slide",
         "fallback": "end"
       },
-      "updatedAt": "2026-06-10T00:55:21.678Z"
+      "updatedAt": "2026-06-10T01:25:31.515Z"
     },
     {
       "deck_id": "ark_i_guide_2",

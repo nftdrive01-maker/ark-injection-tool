@@ -6860,7 +6860,7 @@ export default function AdminPage() {
                                 onChange={(e) =>
                                   updateSelectedGuideSlide(index, {
                                     qa: {
-                                      keywords: e.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+                                      keywords: e.target.value.split(',').map((item) => item.trimStart()),
                                       context: slide.qa?.context || '',
                                     },
                                   })
