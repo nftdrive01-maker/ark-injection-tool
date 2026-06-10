@@ -8998,5 +8998,45 @@
     "enabled": true,
     "priority": 100,
     "updatedAt": "2026-06-10T12:47:58.759Z"
+  },
+  {
+    "id": "rule_7",
+    "from": "環境",
+    "to": "かんきょう",
+    "enabled": true,
+    "priority": 100,
+    "updatedAt": "2026-06-10T14:08:34.226Z"
+  },
+  {
+    "id": "rule_8",
+    "from": "動作環境",
+    "to": "どうさかんきょう",
+    "enabled": true,
+    "priority": 100,
+    "updatedAt": "2026-06-10T14:08:44.130Z"
+  },
+  {
+    "id": "rule_9",
+    "from": "ローカル環境",
+    "to": "ろうかるかんきょう",
+    "enabled": true,
+    "priority": 100,
+    "updatedAt": "2026-06-10T14:11:08.820Z"
+  },
+  {
+    "id": "ark-i_1",
+    "from": "Ark-I",
+    "to": "アークアイ",
+    "enabled": true,
+    "priority": 100,
+    "updatedAt": "2026-06-10T14:18:15.681Z"
+  },
+  {
+    "id": "ark-i_2",
+    "from": "ark-i",
+    "to": "アークアイ",
+    "enabled": true,
+    "priority": 100,
+    "updatedAt": "2026-06-10T14:18:26.214Z"
   }
 ]

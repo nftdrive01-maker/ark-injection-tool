@@ -2,7 +2,7 @@
   "maxConcurrentSessions": 4,
   "chatRequestsPerUserPerMinute": 10,
   "ttsRequestsPerUserPerMinute": 60,
-  "launcherEnabled": false,
+  "launcherEnabled": true,
   "termsOfUseUrl": "",
   "privacyPolicyUrl": ""
 }

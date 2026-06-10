@@ -147,8 +147,8 @@
           "type": "image",
           "title": "Ark-i説明資料2026",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601_1781092098039.jpg",
-          "display_seconds": 20,
-          "notes": "株式会社NFTDrive。\nArk-iの説明を始めさせていただきます。\n",
+          "display_seconds": 14,
+          "notes": "株式会社NFTDrive。Ark-iの説明を始めさせていただきます。\n",
           "qa": {
             "keywords": [
               "ランディングページ",
@@ -163,8 +163,8 @@
           "type": "image",
           "title": "従来のAIにおける課題",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__1__1781093356545.jpg",
-          "display_seconds": 35,
-          "notes": "まず従来のAIに置ける、主な課題です。\n実際に現場にAIを導入しようとした場合、このような課題がございます。\n１　学習コストでは膨大なデータとコスト時間を消費します。\n２　クラウド依存では、データの誤送信や、流出のリスクが付きまといます。\n３　情報更新の遅れ、新しい情報のすばやい更新が難しい。\nそして非検証性、その回答情報が正しいのか？誰もが検証することが困難です。",
+          "display_seconds": 37,
+          "notes": "まず従来のAIに置ける、主な課題です。\n実際に現場にAIを導入しようとした場合、このような課題がございます。\n１学習コストでは膨大なデータとコスト時間を消費します。\n２クラウド依存では、データの誤送信や、流出のリスクが付きまといます。\n３情報更新の遅れ、新しい情報のすばやい更新が難しい。\nそして非検証性、その回答情報が正しいのか？誰もが検証することが困難です。",
           "qa": {
             "keywords": [
               "2ページ",
@@ -178,8 +178,8 @@
           "type": "image",
           "title": "最も重要な課題",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__2__1781085053830.jpg",
-          "display_seconds": 35,
-          "notes": "次に、従来のAIにおける最大課題ですが、それがコンテキストの容量です。\nコンテキストとは、AIに一度に渡せるデータの容量です。\nとりわけ、ローカルLLMでAIを動かそうとしますと、容量が小さくなり、スライドのような不具合が起きてきます。\n\nそこで、Ark-iではすべてのデータ、記憶を一度に読み込まず、必要な特定の記憶をAIに素早く注入してコンテキスト容量を劇的に節約して精度の高い応答を維持します。\n",
+          "display_seconds": 40,
+          "notes": "次に、従来のAIにおける最大課題ですが、それがコンテキストの容量です。\nコンテキストとは、AIに一度に渡せるデータの容量です。\nとりわけ、ローカルLLMでAIを動かそうとしますと。\n容量が小さくなり、スライドのような不具合が起きてきます。\n\nそこで、Ark-iではすべてのデータ。記憶を一度に読み込まず。\n必要な特定の記憶をAIに素早く注入してコンテキスト容量を劇的に節約し。\n精度の高い応答を維持します。\n",
           "qa": {
             "keywords": [
               "質問",
@@ -194,8 +194,8 @@
           "type": "image",
           "title": "Ark-iの特徴",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__3__1781092027850.jpg",
-          "display_seconds": 35,
-          "notes": "Ark-iの特徴を並べました、\nドメインという単位で、ナレッジやAIのキャラクターを管理します。\n\n専門知識を持つAIを構築、音声チャットで自然に対話、ローカル環境で運用可能、小型のAIでも精度の高い回答を得られます。\nナレッジの共有も簡単に行えます。\n",
+          "display_seconds": 30,
+          "notes": "Ark-iの特徴を並べました、\nドメインという単位で、ナレッジやAIのキャラクターを管理します。\n\n専門知識を持つAIを構築。\n音声チャットで自然に対話、ローカル環境で運用可能。\n小型のAIでも精度の高い回答を得られます。\nナレッジの共有も簡単に行えます。\n",
           "qa": {
             "keywords": [],
             "context": ""
@@ -218,7 +218,7 @@
           "type": "image",
           "title": "専門知識",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__5__1781093525944.jpg",
-          "display_seconds": 27,
+          "display_seconds": 15,
           "notes": "様々な専門知識をアタッチして、高精度な回答を実現します。\n",
           "qa": {
             "keywords": [],
@@ -230,7 +230,7 @@
           "type": "image",
           "title": "ナレッジの切り替え",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__6__1781093588023.jpg",
-          "display_seconds": 25,
+          "display_seconds": 15,
           "notes": "ナレッジは即時切り替え、反映が可能です。\n例えばナレッジを追加、あるいは切り替えることで、スライドのよう緊急配信なども行えます。",
           "qa": {
             "keywords": [],
@@ -242,7 +242,7 @@
           "type": "image",
           "title": "キャラクター",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__7__1781093650802.jpg",
-          "display_seconds": 26,
+          "display_seconds": 18,
           "notes": "キャラクターはVRMや２D画像などのを使ったリップシンク機能。\n好きな背景、クローンした音声などを設定して、キャラクターを自由に作ることができます。\n",
           "qa": {
             "keywords": [],
@@ -254,7 +254,7 @@
           "type": "image",
           "title": "音声入力、Webカメラ",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__8__1781093687564.jpg",
-          "display_seconds": 26,
+          "display_seconds": 22,
           "notes": "音声入力、音声出力にも対応しています。\nWebカメラを使った視線起動モードがあり、サイネージなどユーザーと視線が合った場合にマイクがONになり直感的なインターフェースを提供します。",
           "qa": {
             "keywords": [
@@ -274,7 +274,7 @@
           "type": "image",
           "title": "ローカル対応",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__9__1781093732828.jpg",
-          "display_seconds": 25,
+          "display_seconds": 15,
           "notes": "完全ローカル環境で運用可能です。\nオフライン端末での閉域での運用に対応します。\n",
           "qa": {
             "keywords": [
@@ -289,7 +289,7 @@
           "type": "image",
           "title": "小型AIでも利用可能",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__10__1781094186427.jpg",
-          "display_seconds": 25,
+          "display_seconds": 15,
           "notes": "小型のAIにおいても、最小限の追加したナレッジをもとに精度の高い回答が可能です。\n",
           "qa": {
             "keywords": [
@@ -303,8 +303,8 @@
           "type": "image",
           "title": "データベースとの接続",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__11__1781094387974.jpg",
-          "display_seconds": 25,
-          "notes": "しかし、もっと沢山のデータを扱いたい場合にはコンテキストに収まらななくなります。\nその場合にはデーターベースMCPを活用することで、漏れなくユーザーにデータを掲示します。\n",
+          "display_seconds": 21,
+          "notes": "しかし、もっと沢山のデータを扱いたい場合にはコンテキストに収まらなくなります。\nその場合にはデーターベースMCPを活用することで、漏れなくユーザーにデータを掲示します。\n",
           "qa": {
             "keywords": [
               "データベース",
@@ -318,7 +318,7 @@
           "type": "image",
           "title": "システムの公開利用の図",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__12__1781094562973.jpg",
-          "display_seconds": 35,
+          "display_seconds": 25,
           "notes": "続いて、システムの利用イメージです。\nArk-iは主に一般的なゲーミングPCで動作し、ローカルで利用できます。\nチャット機能を公開することで、インターネットからの利用もサポートしています。\n",
           "qa": {
             "keywords": [
@@ -333,7 +333,7 @@
           "type": "image",
           "title": "ユースケース",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__13__1781094685658.jpg",
-          "display_seconds": 35,
+          "display_seconds": 24,
           "notes": "ほかにも、サイネージとして店舗に設置し、案内利用や、トップセールスのナレッジを商談に活用したり、専門家の知識を注入して相談したり様々なユースケースに対応します。\n",
           "qa": {
             "keywords": [
@@ -348,7 +348,7 @@
           "type": "image",
           "title": "動作環境",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__14__1781094810626.jpg",
-          "display_seconds": 30,
+          "display_seconds": 25,
           "notes": "動作環境はスライドの通りです。\nローカルか、OpenAIのAPIで必要なスペックが変わります、また、キャラクターの設定でも違いがあります。\n",
           "qa": {
             "keywords": [
@@ -363,7 +363,7 @@
           "type": "image",
           "title": "オンチェーンの連携システム図",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__15__1781094966989.jpg",
-          "display_seconds": 43,
+          "display_seconds": 35,
           "notes": "オンチェーンＡＩデータ連携基盤の全体図です、弊社のNFTDriveとの連携を示したものになります。\nArk-iはAIにキャラクターと知識を注入するエンジンです。\nArk-iは、ブロックチェーンデータの出典付AI、CHRONICLEと接続できます。\nCHRONICLEはBEYOND検証基盤に接続されていて、検証可能なオンチェーンの情報を取り出すことができます。\nこのBEYOND検証基盤はNFTDriveを使って構築されています。\n\n\n",
           "qa": {
             "keywords": [
@@ -380,7 +380,7 @@
           "type": "image",
           "title": "導入料金",
           "url": "http://localhost:4001/guide-images/Ark-i____20260601__16__1781095051673.jpg",
-          "display_seconds": 26,
+          "display_seconds": 20,
           "notes": "導入料金は、ご予算と事業規模に合わせてお見積りいたしますのでお気軽にお問い合わせください。\nまた、ゲーミングPCとインターネットの環境が必要になります。\n",
           "qa": {
             "keywords": [
@@ -417,7 +417,7 @@
         "qa_behavior": "jump_to_related_slide",
         "fallback": "end"
       },
-      "updatedAt": "2026-06-10T12:42:20.453Z"
+      "updatedAt": "2026-06-10T14:31:57.279Z"
     }
   ]
 }
