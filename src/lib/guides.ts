@@ -11,6 +11,10 @@ export interface GuideSlide {
   url?: string;
   display_seconds?: number;
   notes: string;
+  qa?: {
+    keywords: string[];
+    context: string;
+  };
 }
 
 export interface GuideDeck {
@@ -23,6 +27,11 @@ export interface GuideDeck {
   qa_context?: {
     enabled: boolean;
     source: string;
+  };
+  after_guide?: {
+    mode: 'end' | 'qa' | 'loop';
+    qa_behavior?: 'jump_to_related_slide';
+    fallback?: 'end';
   };
   updatedAt: string;
 }
@@ -67,6 +76,11 @@ const DEFAULT_GUIDE: GuideDeck = {
     enabled: true,
     source: 'slides_and_notes',
   },
+  after_guide: {
+    mode: 'qa',
+    qa_behavior: 'jump_to_related_slide',
+    fallback: 'end',
+  },
   updatedAt: new Date().toISOString(),
 };
 
@@ -104,26 +118,49 @@ function normalizeTags(value: unknown): string[] {
 }
 
 function normalizeSlide(value: unknown, index: number): GuideSlide {
-  const item = value && typeof value === 'object' ? value as Partial<GuideSlide> : {};
+  const item = value && typeof value === 'object' ? value as Partial<GuideSlide> & { page?: number } : {};
   const type: GuideSlideType =
     item.type === 'web' || item.type === 'image' || item.type === 'qa' ? item.type : 'qa';
   const rawSeconds = Number(item.display_seconds);
   const displaySeconds = Number.isFinite(rawSeconds) && rawSeconds > 0
     ? Math.floor(rawSeconds)
     : DEFAULT_SLIDE_SECONDS;
+  const qa = item.qa && typeof item.qa === 'object' ? item.qa : undefined;
+  const qaKeywords = normalizeTags(qa?.keywords);
+  const rawSlideNo = Number(item.slide_no ?? item.page);
+  const slideNo = Number.isFinite(rawSlideNo) && rawSlideNo > 0 ? Math.floor(rawSlideNo) : index + 1;
 
   return {
-    slide_no: index + 1,
+    slide_no: slideNo,
     type,
     title: typeof item.title === 'string' ? item.title.trim() : '',
     url: typeof item.url === 'string' ? item.url.trim() : '',
     display_seconds: displaySeconds,
     notes: typeof item.notes === 'string' ? item.notes : '',
+    qa: {
+      keywords: qaKeywords,
+      context: typeof qa?.context === 'string' ? qa.context : '',
+    },
+  };
+}
+
+function normalizeAfterGuide(value: unknown): GuideDeck['after_guide'] {
+  const item = value && typeof value === 'object'
+    ? value as Partial<NonNullable<GuideDeck['after_guide']>>
+    : {};
+  const mode = item.mode === 'qa' || item.mode === 'loop' || item.mode === 'end'
+    ? item.mode
+    : 'end';
+
+  return {
+    mode,
+    qa_behavior: item.qa_behavior === 'jump_to_related_slide' ? item.qa_behavior : 'jump_to_related_slide',
+    fallback: item.fallback === 'end' ? item.fallback : 'end',
   };
 }
 
 function normalizeGuide(value: unknown, index: number): GuideDeck {
-  const item = value && typeof value === 'object' ? value as Partial<GuideDeck> : {};
+  const item = value && typeof value === 'object' ? value as Partial<GuideDeck> & { guide_id?: string } : {};
   const fallbackId = `guide_${index + 1}`;
   const slides = Array.isArray(item.slides) && item.slides.length > 0
     ? item.slides.map((slide, slideIndex) => normalizeSlide(slide, slideIndex))
@@ -133,7 +170,7 @@ function normalizeGuide(value: unknown, index: number): GuideDeck {
     : undefined;
 
   return {
-    deck_id: sanitizeId(item.deck_id, fallbackId),
+    deck_id: sanitizeId(item.deck_id || item.guide_id, fallbackId),
     version: typeof item.version === 'string' && item.version.trim() ? item.version.trim() : '0.1.0',
     title: typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `ガイド ${index + 1}`,
     description: typeof item.description === 'string' ? item.description : '',
@@ -145,6 +182,7 @@ function normalizeGuide(value: unknown, index: number): GuideDeck {
         ? qaContext.source.trim()
         : 'slides_and_notes',
     },
+    after_guide: normalizeAfterGuide(item.after_guide),
     updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
   };
 }

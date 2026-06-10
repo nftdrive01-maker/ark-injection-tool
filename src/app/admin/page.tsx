@@ -89,6 +89,10 @@ interface GuideSlide {
   url?: string;
   display_seconds?: number;
   notes: string;
+  qa?: {
+    keywords: string[];
+    context: string;
+  };
 }
 
 interface GuideDeck {
@@ -101,6 +105,11 @@ interface GuideDeck {
   qa_context?: {
     enabled: boolean;
     source: string;
+  };
+  after_guide?: {
+    mode: 'end' | 'qa' | 'loop';
+    qa_behavior?: 'jump_to_related_slide';
+    fallback?: 'end';
   };
   updatedAt?: string;
 }
@@ -343,6 +352,10 @@ function createDefaultGuideDeck(index = 1): GuideDeck {
         url: 'https://ark-i.nftdrive.net',
         display_seconds: DEFAULT_GUIDE_SLIDE_SECONDS,
         notes: 'こちらがArk-iのランディングページです。Ark-iは、現場ごとのドメインに応じてAIコンシェルジュを切り替えられる仕組みです。',
+        qa: {
+          keywords: ['ランディングページ', '概要', 'Ark-i'],
+          context: 'Ark-iのランディングページと全体概要を説明するページです。',
+        },
       },
       {
         slide_no: 2,
@@ -350,6 +363,10 @@ function createDefaultGuideDeck(index = 1): GuideDeck {
         url: 'https://ark-i.nftdrive.net/img/screenshot1.png',
         display_seconds: DEFAULT_GUIDE_SLIDE_SECONDS,
         notes: 'この図はArk-iの基本構成です。Amicaがユーザーインターフェースを担当し、BEYOND-CoreがMCPや外部サービスとの接続を担当します。',
+        qa: {
+          keywords: ['構成', 'MCP', 'BEYOND-Core', 'Amica'],
+          context: 'Ark-iはAmica、BEYOND-Core、MCP、LLMで構成されます。',
+        },
       },
       {
         slide_no: 3,
@@ -357,11 +374,20 @@ function createDefaultGuideDeck(index = 1): GuideDeck {
         title: '質疑応答',
         display_seconds: DEFAULT_GUIDE_SLIDE_SECONDS,
         notes: '以上で説明は終了です。ここからは、Ark-iについてご質問ください。',
+        qa: {
+          keywords: ['質問', '質疑応答', 'QA'],
+          context: 'ガイド終了後の質疑応答ページです。',
+        },
       },
     ],
     qa_context: {
       enabled: true,
       source: 'slides_and_notes',
+    },
+    after_guide: {
+      mode: 'qa',
+      qa_behavior: 'jump_to_related_slide',
+      fallback: 'end',
     },
   };
 }
@@ -2791,10 +2817,19 @@ export default function AdminPage() {
       ...slide,
       slide_no: index + 1,
       display_seconds: Math.max(1, Math.floor(Number(slide.display_seconds) || DEFAULT_GUIDE_SLIDE_SECONDS)),
+      qa: {
+        keywords: Array.isArray(slide.qa?.keywords) ? slide.qa.keywords.map((keyword) => keyword.trim()).filter(Boolean) : [],
+        context: slide.qa?.context || '',
+      },
     })),
     qa_context: {
       enabled: guide.qa_context?.enabled === true,
       source: guide.qa_context?.source || 'slides_and_notes',
+    },
+    after_guide: {
+      mode: guide.after_guide?.mode || 'end',
+      qa_behavior: 'jump_to_related_slide',
+      fallback: 'end',
     },
   });
 
@@ -3156,6 +3191,8 @@ export default function AdminPage() {
         ...parsed,
         deck_id: typeof parsed.deck_id === 'string' && parsed.deck_id.trim()
           ? parsed.deck_id.trim()
+          : typeof parsed.guide_id === 'string' && parsed.guide_id.trim()
+            ? parsed.guide_id.trim()
           : selectedGuide?.deck_id || `ark_i_guide_${guides.length + 1}`,
         slides: parsed.slides.map((slide: Partial<GuideSlide>, index: number) => ({
           slide_no: index + 1,
@@ -3164,7 +3201,20 @@ export default function AdminPage() {
           url: typeof slide.url === 'string' ? slide.url : '',
           display_seconds: Math.max(1, Math.floor(Number(slide.display_seconds) || DEFAULT_GUIDE_SLIDE_SECONDS)),
           notes: typeof slide.notes === 'string' ? slide.notes : '',
+          qa: {
+            keywords: Array.isArray(slide.qa?.keywords)
+              ? slide.qa.keywords.map((keyword) => String(keyword).trim()).filter(Boolean)
+              : [],
+            context: typeof slide.qa?.context === 'string' ? slide.qa.context : '',
+          },
         })),
+        after_guide: {
+          mode: parsed.after_guide?.mode === 'qa' || parsed.after_guide?.mode === 'loop' || parsed.after_guide?.mode === 'end'
+            ? parsed.after_guide.mode
+            : 'end',
+          qa_behavior: 'jump_to_related_slide',
+          fallback: 'end',
+        },
       } as GuideDeck;
 
       setSelectedGuide(nextGuide);
@@ -6649,6 +6699,47 @@ export default function AdminPage() {
                         />
                       </label>
                     </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                      <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                        ガイド終了後
+                        <select
+                          value={selectedGuide.after_guide?.mode || 'end'}
+                          onChange={(e) =>
+                            updateSelectedGuide({
+                              after_guide: {
+                                mode: e.target.value as 'end' | 'qa' | 'loop',
+                                qa_behavior: 'jump_to_related_slide',
+                                fallback: 'end',
+                              },
+                            })
+                          }
+                          style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                        >
+                          <option value="end">end: 通常チャットへ戻る</option>
+                          <option value="qa">qa: 質疑応答モードへ入る</option>
+                          <option value="loop">loop: 最初から再生</option>
+                        </select>
+                      </label>
+                      <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                        QA動作
+                        <input
+                          type="text"
+                          value={selectedGuide.after_guide?.qa_behavior || 'jump_to_related_slide'}
+                          readOnly
+                          style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', backgroundColor: '#f8fafc' }}
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                        fallback
+                        <input
+                          type="text"
+                          value={selectedGuide.after_guide?.fallback || 'end'}
+                          readOnly
+                          style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', backgroundColor: '#f8fafc' }}
+                        />
+                      </label>
+                    </div>
                   </section>
 
                   <section style={{ padding: '16px', border: '1px solid #b3e5fc', borderRadius: '8px', backgroundColor: '#f3fbff' }}>
@@ -6759,6 +6850,43 @@ export default function AdminPage() {
                               style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', resize: 'vertical', lineHeight: 1.6 }}
                             />
                           </label>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
+                            <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                              QAキーワード（カンマ区切り）
+                              <input
+                                type="text"
+                                value={(slide.qa?.keywords || []).join(', ')}
+                                onChange={(e) =>
+                                  updateSelectedGuideSlide(index, {
+                                    qa: {
+                                      keywords: e.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+                                      context: slide.qa?.context || '',
+                                    },
+                                  })
+                                }
+                                placeholder="構成, MCP, BEYOND-Core, Amica"
+                                style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                              />
+                            </label>
+                            <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                              QAコンテキスト
+                              <textarea
+                                value={slide.qa?.context || ''}
+                                onChange={(e) =>
+                                  updateSelectedGuideSlide(index, {
+                                    qa: {
+                                      keywords: slide.qa?.keywords || [],
+                                      context: e.target.value,
+                                    },
+                                  })
+                                }
+                                rows={3}
+                                placeholder="このページに関連する質問へ回答するときの補足情報"
+                                style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', resize: 'vertical', lineHeight: 1.6 }}
+                              />
+                            </label>
+                          </div>
                         </article>
                       ))}
                     </div>

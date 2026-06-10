@@ -18,7 +18,11 @@
           "title": "",
           "url": "https://ark-i.nftdrive.net",
           "display_seconds": 20,
-          "notes": "こちらがArk-iのランディングページです。Ark-iは、現場ごとのドメインに応じてAIコンシェルジュを切り替えられる仕組みです。"
+          "notes": "こちらがArk-iのランディングページです。Ark-iは、現場ごとのドメインに応じてAIコンシェルジュを切り替えられる仕組みです。",
+          "qa": {
+            "keywords": [],
+            "context": ""
+          }
         },
         {
           "slide_no": 2,
@@ -26,7 +30,11 @@
           "title": "",
           "url": "https://ark-i.nftdrive.net/img/screenshot1.png",
           "display_seconds": 20,
-          "notes": "この図はArk-iの基本構成です。Amicaがユーザーインターフェースを担当し、BEYOND-CoreがMCPや外部サービスとの接続を担当します。"
+          "notes": "この図はArk-iの基本構成です。Amicaがユーザーインターフェースを担当し、BEYOND-CoreがMCPや外部サービスとの接続を担当します。",
+          "qa": {
+            "keywords": [],
+            "context": ""
+          }
         },
         {
           "slide_no": 3,
@@ -34,14 +42,23 @@
           "title": "質疑応答",
           "url": "",
           "display_seconds": 20,
-          "notes": "以上で説明は終了です。ここからは、Ark-iについてご質問ください。"
+          "notes": "以上で説明は終了です。ここからは、Ark-iについてご質問ください。",
+          "qa": {
+            "keywords": [],
+            "context": ""
+          }
         }
       ],
       "qa_context": {
         "enabled": true,
         "source": "slides_and_notes"
       },
-      "updatedAt": "2026-06-09T08:22:48.437Z"
+      "after_guide": {
+        "mode": "loop",
+        "qa_behavior": "jump_to_related_slide",
+        "fallback": "end"
+      },
+      "updatedAt": "2026-06-10T00:55:21.678Z"
     },
     {
       "deck_id": "ark_i_guide_2",
@@ -61,7 +78,11 @@
           "title": "NFTDriveの発表です。",
           "url": "https://nftdrive.net",
           "display_seconds": 10,
-          "notes": "こちらがNFTDriveのランディングページです。NFTDrive、現場ごとのドメインに応じてAIコンシェルジュを切り替えられる仕組みです。"
+          "notes": "こちらがNFTDriveのランディングページです。NFTDrive、現場ごとのドメインに応じてAIコンシェルジュを切り替えられる仕組みです。",
+          "qa": {
+            "keywords": [],
+            "context": ""
+          }
         },
         {
           "slide_no": 2,
@@ -69,7 +90,11 @@
           "title": "",
           "url": "https://ark-i.nftdrive.net/img/screenshot1.png",
           "display_seconds": 10,
-          "notes": "この図はNFTDriveの基本構成です。Amicaがユーザーインターフェースを担当し、BEYOND-CoreがMCPや外部サービスとの接続を担当します。"
+          "notes": "この図はNFTDriveの基本構成です。Amicaがユーザーインターフェースを担当し、BEYOND-CoreがMCPや外部サービスとの接続を担当します。",
+          "qa": {
+            "keywords": [],
+            "context": ""
+          }
         },
         {
           "slide_no": 3,
@@ -77,12 +102,21 @@
           "title": "質疑応答",
           "url": "",
           "display_seconds": 10,
-          "notes": "以上で説明は終了です。ここからは、Ark-iについてご質問ください。"
+          "notes": "以上で説明は終了です。ここからは、Ark-iについてご質問ください。",
+          "qa": {
+            "keywords": [],
+            "context": ""
+          }
         }
       ],
       "qa_context": {
         "enabled": true,
         "source": "slides_and_notes"
+      },
+      "after_guide": {
+        "mode": "end",
+        "qa_behavior": "jump_to_related_slide",
+        "fallback": "end"
       },
       "updatedAt": "2026-06-09T09:45:10.384Z"
     }
