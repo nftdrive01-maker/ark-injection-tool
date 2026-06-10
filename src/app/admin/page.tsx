@@ -403,6 +403,48 @@ function guideInputToTags(input: string): string[] {
     .filter(Boolean);
 }
 
+function isGuideImageUrl(url: string | undefined): boolean {
+  if (!url) {
+    return false;
+  }
+
+  try {
+    const pathname = url.startsWith('http://') || url.startsWith('https://')
+      ? new URL(url).pathname
+      : url;
+    return pathname.startsWith('/guide-images/');
+  } catch {
+    return false;
+  }
+}
+
+function normalizeGuideImageUrl(url: string | undefined): string {
+  if (!url || typeof window === 'undefined') {
+    return url || '';
+  }
+
+  try {
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.pathname.startsWith('/guide-images/') && parsed.hostname === '0.0.0.0') {
+      return new URL(parsed.pathname + parsed.search + parsed.hash, window.location.origin).toString();
+    }
+  } catch {
+    return url;
+  }
+
+  return url;
+}
+
+function normalizeGuideDeckImageUrls(guide: GuideDeck): GuideDeck {
+  return {
+    ...guide,
+    slides: guide.slides.map((slide) => ({
+      ...slide,
+      url: slide.type === 'image' ? normalizeGuideImageUrl(slide.url) : slide.url,
+    })),
+  };
+}
+
 const DOMAIN_PROMPT_TEMPLATES: DomainPromptTemplate[] = [
   {
     id: 'generic-concierge',
@@ -551,6 +593,9 @@ export default function AdminPage() {
   const [guideTagsInput, setGuideTagsInput] = useState('');
   const [guideJsonImportInput, setGuideJsonImportInput] = useState('');
   const [savingGuide, setSavingGuide] = useState(false);
+  const [guideImageFiles, setGuideImageFiles] = useState<AssetFile[]>([]);
+  const [uploadingGuideImageSlideIndex, setUploadingGuideImageSlideIndex] = useState<number | null>(null);
+  const [deletingGuideImageUrl, setDeletingGuideImageUrl] = useState<string | null>(null);
   const [chronicles, setChronicles] = useState<Chronicle[]>([]);
   const [selectedChronicle, setSelectedChronicle] = useState<Chronicle | null>(null);
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -937,10 +982,13 @@ export default function AdminPage() {
 
     if (guidesRes.ok) {
       const guideData = await guidesRes.json();
-      setGuides(Array.isArray(guideData) ? guideData : []);
-      if (Array.isArray(guideData) && guideData.length > 0) {
-        setSelectedGuide(guideData[0]);
-        setGuideTagsInput(guideTagsToInput(guideData[0].tags));
+      const normalizedGuides = Array.isArray(guideData)
+        ? guideData.map((guide: GuideDeck) => normalizeGuideDeckImageUrls(guide))
+        : [];
+      setGuides(normalizedGuides);
+      if (normalizedGuides.length > 0) {
+        setSelectedGuide(normalizedGuides[0]);
+        setGuideTagsInput(guideTagsToInput(normalizedGuides[0].tags));
       }
     }
 
@@ -1212,6 +1260,50 @@ export default function AdminPage() {
       setBgImageAssets(bgimage);
     } catch (err) {
       console.error('Failed to load asset files:', err);
+    }
+  };
+
+  const loadGuideImageFiles = async (token: string): Promise<AssetFile[]> => {
+    const response = await fetch('/api/guide-images', {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: 'no-store',
+    });
+
+    if (handleUnauthorizedResponse(response.status)) {
+      return [];
+    }
+
+    if (!response.ok) {
+      throw new Error('Failed to load guide images');
+    }
+
+    const payload = await response.json().catch(() => null);
+    if (!Array.isArray(payload?.files)) {
+      return [];
+    }
+
+    return payload.files
+      .filter((item: unknown): item is AssetFile => {
+        return Boolean(
+          item &&
+          typeof item === 'object' &&
+          'name' in item &&
+          'url' in item &&
+          typeof item.name === 'string' &&
+          typeof item.url === 'string'
+        );
+      })
+      .map((item: AssetFile) => ({ name: item.name, url: normalizeGuideImageUrl(item.url) }));
+  };
+
+  const loadAllGuideImages = async (token: string) => {
+    try {
+      setGuideImageFiles(await loadGuideImageFiles(token));
+    } catch (err) {
+      console.error('Failed to load guide images:', err);
     }
   };
 
@@ -2621,6 +2713,119 @@ export default function AdminPage() {
     }
   };
 
+  const handleUploadGuideImage = async (slideIndex: number, file: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    try {
+      setUploadingGuideImageSlideIndex(slideIndex);
+      setMessage('');
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/guide-images', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (handleUnauthorizedResponse(response.status)) {
+        return;
+      }
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setMessage(payload?.error || 'ガイド画像のアップロードに失敗しました');
+        return;
+      }
+
+      const uploadedUrl = payload?.file?.url;
+      if (typeof uploadedUrl === 'string') {
+        updateSelectedGuideSlide(slideIndex, { type: 'image', url: uploadedUrl });
+      }
+
+      await loadAllGuideImages(token);
+      setMessage('ガイド画像をアップロードしました');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      console.error(err);
+      setMessage('ガイド画像アップロード時にエラーが発生しました');
+    } finally {
+      setUploadingGuideImageSlideIndex(null);
+    }
+  };
+
+  const handleDeleteGuideImage = async (url: string | undefined) => {
+    if (!url) {
+      setMessage('削除するガイド画像を選択してください');
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    if (!window.confirm('選択中のガイド画像を削除しますか？')) {
+      return;
+    }
+
+    try {
+      setDeletingGuideImageUrl(url);
+      setMessage('');
+
+      const response = await fetch('/api/guide-images', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ url }),
+      });
+
+      if (handleUnauthorizedResponse(response.status)) {
+        return;
+      }
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setMessage(payload?.error || 'ガイド画像の削除に失敗しました');
+        return;
+      }
+
+      await loadAllGuideImages(token);
+      setSelectedGuide((prev) => {
+        if (!prev) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          // 削除した画像を参照しているページはURLを空にして、存在しない画像を保存しないようにする。
+          slides: prev.slides.map((slide) => (slide.url === url ? { ...slide, url: '' } : slide)),
+        };
+      });
+      setMessage('ガイド画像を削除しました');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      console.error(err);
+      setMessage('ガイド画像削除時にエラーが発生しました');
+    } finally {
+      setDeletingGuideImageUrl(null);
+    }
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -2643,6 +2848,7 @@ export default function AdminPage() {
         await loadAllData(token);
         await loadRuntimeModelInfo(token);
         await loadAllAssets(token);
+        await loadAllGuideImages(token);
         await loadSbv2Models(token);
         await loadPublicManagementSettings(token);
         await loadAdminLoginHistory(token);
@@ -2734,7 +2940,9 @@ export default function AdminPage() {
     }
 
     const guideData = await response.json();
-    const nextGuides = Array.isArray(guideData) ? guideData : [];
+    const nextGuides = Array.isArray(guideData)
+      ? guideData.map((guide: GuideDeck) => normalizeGuideDeckImageUrls(guide))
+      : [];
     setGuides(nextGuides);
     if (nextGuides.length === 0) {
       setSelectedGuide(null);
@@ -2763,7 +2971,7 @@ export default function AdminPage() {
 
     const slides = selectedGuide.slides.map((slide, slideIndex) => (
       slideIndex === index
-        ? { ...slide, ...patch }
+        ? { ...slide, ...patch, url: 'url' in patch ? normalizeGuideImageUrl(patch.url) : slide.url }
         : slide
     ));
 
@@ -2816,6 +3024,7 @@ export default function AdminPage() {
     slides: guide.slides.map((slide, index) => ({
       ...slide,
       slide_no: index + 1,
+      url: slide.type === 'image' ? normalizeGuideImageUrl(slide.url) : slide.url,
       display_seconds: Math.max(1, Math.floor(Number(slide.display_seconds) || DEFAULT_GUIDE_SLIDE_SECONDS)),
       qa: {
         keywords: Array.isArray(slide.qa?.keywords) ? slide.qa.keywords.map((keyword) => keyword.trim()).filter(Boolean) : [],
@@ -6601,6 +6810,56 @@ export default function AdminPage() {
                   ))}
                 </ul>
               )}
+
+              <div style={{ marginTop: '18px', paddingTop: '14px', borderTop: '1px solid #e5e7eb' }}>
+                <h3 style={{ marginTop: 0 }}>ガイド画像</h3>
+                <div style={{ marginBottom: '10px', fontSize: '13px', color: '#444' }}>
+                  登録画像: <strong>{guideImageFiles.length}</strong>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const token = localStorage.getItem('injection_token');
+                    if (!token) {
+                      setMessage('認証情報が見つかりません。再ログインしてください');
+                      return;
+                    }
+                    await loadAllGuideImages(token);
+                    setMessage('ガイド画像一覧を更新しました');
+                    setTimeout(() => setMessage(''), 3000);
+                  }}
+                  style={{
+                    padding: '6px 10px',
+                    backgroundColor: '#2563eb',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    marginBottom: '10px',
+                  }}
+                >
+                  画像一覧を再取得
+                </button>
+                {guideImageFiles.length > 0 && (
+                  <div style={{ display: 'grid', gap: '8px', maxHeight: '220px', overflowY: 'auto' }}>
+                    {guideImageFiles.map((file) => (
+                      <div key={file.url} style={{ display: 'flex', gap: '8px', alignItems: 'center', minWidth: 0 }}>
+                        <img
+                          src={file.url}
+                          alt={file.name}
+                          loading="lazy"
+                          style={{ width: '42px', height: '42px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #e5e7eb', flexShrink: 0 }}
+                        />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '12px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</div>
+                          <div style={{ fontSize: '11px', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.url}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </aside>
 
             <main>
@@ -6829,16 +7088,91 @@ export default function AdminPage() {
                             </label>
                           </div>
 
-                          <label style={{ display: 'grid', gap: '4px', fontWeight: 600, marginBottom: '10px' }}>
-                            URL（web/imageページで使用）
-                            <input
-                              type="url"
-                              value={slide.url || ''}
-                              onChange={(e) => updateSelectedGuideSlide(index, { url: e.target.value })}
-                              placeholder="https://example.com"
-                              style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-                            />
-                          </label>
+                          <div style={{ display: 'grid', gap: '8px', marginBottom: '10px' }}>
+                            <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                              URL（web/imageページで使用）
+                              <input
+                                type="url"
+                                value={normalizeGuideImageUrl(slide.url)}
+                                onChange={(e) => updateSelectedGuideSlide(index, { url: e.target.value })}
+                                placeholder="https://example.com"
+                                style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                              />
+                            </label>
+
+                            {slide.type === 'image' && (
+                              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: '8px', alignItems: 'center' }}>
+                                <select
+                                  value={normalizeGuideImageUrl(slide.url)}
+                                  onChange={(e) => updateSelectedGuideSlide(index, { url: e.target.value })}
+                                  style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', minWidth: 0 }}
+                                >
+                                  <option value="">アップロード済みガイド画像から選択</option>
+                                  {guideImageFiles.map((file) => (
+                                    <option key={file.url} value={file.url}>
+                                      {file.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                <label
+                                  style={{
+                                    padding: '8px 10px',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '4px',
+                                    backgroundColor: uploadingGuideImageSlideIndex === index ? '#eee' : '#f8fafc',
+                                    cursor: uploadingGuideImageSlideIndex === index ? 'default' : 'pointer',
+                                    fontSize: '12px',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {uploadingGuideImageSlideIndex === index ? 'アップロード中...' : '画像をアップロード'}
+                                  <input
+                                    type="file"
+                                    accept=".png,.jpg,.jpeg,.webp,.gif"
+                                    disabled={uploadingGuideImageSlideIndex === index}
+                                    style={{ display: 'none' }}
+                                    onChange={(event) => {
+                                      const file = event.target.files?.[0] || null;
+                                      event.target.value = '';
+                                      void handleUploadGuideImage(index, file);
+                                    }}
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  disabled={!isGuideImageUrl(slide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(slide.url)}
+                                  onClick={() => void handleDeleteGuideImage(normalizeGuideImageUrl(slide.url))}
+                                  style={{
+                                    padding: '8px 10px',
+                                    border: '1px solid #f3b4b4',
+                                    borderRadius: '4px',
+                                    backgroundColor: !isGuideImageUrl(slide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(slide.url) ? '#f3f4f6' : '#fff1f2',
+                                    color: !isGuideImageUrl(slide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(slide.url) ? '#999' : '#b91c1c',
+                                    cursor: !isGuideImageUrl(slide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(slide.url) ? 'default' : 'pointer',
+                                    fontSize: '12px',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {deletingGuideImageUrl === normalizeGuideImageUrl(slide.url) ? '削除中...' : '画像削除'}
+                                </button>
+                              </div>
+                            )}
+
+                            {slide.type === 'image' && slide.url && (
+                              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px', border: '1px solid #e5e7eb', borderRadius: '4px', backgroundColor: '#f8fafc' }}>
+                                <img
+                                  src={normalizeGuideImageUrl(slide.url)}
+                                  alt={slide.title || `ページ ${index + 1} 画像`}
+                                  loading="lazy"
+                                  style={{ width: '96px', height: '56px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #d7dee7', backgroundColor: '#fff', flexShrink: 0 }}
+                                />
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontSize: '12px', fontWeight: 600 }}>画像プレビュー</div>
+                                  <div style={{ fontSize: '12px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{normalizeGuideImageUrl(slide.url)}</div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
 
                           <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
                             読み上げノート
@@ -6892,8 +7226,8 @@ export default function AdminPage() {
                     </div>
                   </section>
 
-                  <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                    <div style={{ padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
+                  <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '16px' }}>
+                    <div style={{ minWidth: 0, padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
                       <h3 style={{ marginTop: 0 }}>JSON取り込み</h3>
                       <textarea
                         value={guideJsonImportInput}
@@ -6920,7 +7254,7 @@ export default function AdminPage() {
                       </button>
                     </div>
 
-                    <div style={{ padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
+                    <div style={{ minWidth: 0, padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
                         <h3 style={{ margin: 0 }}>JSONプレビュー</h3>
                         <button
@@ -6939,7 +7273,7 @@ export default function AdminPage() {
                           ダウンロード
                         </button>
                       </div>
-                      <pre style={{ margin: 0, maxHeight: '360px', overflow: 'auto', padding: '12px', borderRadius: '6px', backgroundColor: '#0f172a', color: '#e2e8f0', fontSize: '12px', lineHeight: 1.6 }}>
+                      <pre style={{ margin: 0, maxWidth: '100%', boxSizing: 'border-box', maxHeight: '360px', overflow: 'auto', padding: '12px', borderRadius: '6px', backgroundColor: '#0f172a', color: '#e2e8f0', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                         {guideJsonPreview}
                       </pre>
                     </div>

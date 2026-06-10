@@ -8990,5 +8990,13 @@
     "enabled": true,
     "priority": 100,
     "updatedAt": "2026-05-31T07:36:37.332Z"
+  },
+  {
+    "id": "ark-i",
+    "from": "Ark-i",
+    "to": "アークアイ",
+    "enabled": true,
+    "priority": 100,
+    "updatedAt": "2026-06-10T12:47:58.759Z"
   }
 ]
