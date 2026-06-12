@@ -114,6 +114,21 @@ interface GuideDeck {
   updatedAt?: string;
 }
 
+interface GuidePackageManifest {
+  format: 'arki-guide-package';
+  version: '1.0';
+  exportedAt: string;
+  deckId: string;
+  title: string;
+  assets: Array<{
+    slideNo: number;
+    originalUrl: string;
+    path: string;
+    mimeType: string;
+    included: boolean;
+  }>;
+}
+
 interface Memory {
   id: string | number;
   name: string;
@@ -155,6 +170,16 @@ interface RuntimeModelInfo {
 interface AssetFile {
   name: string;
   url: string;
+}
+
+interface ZipBuildEntry {
+  name: string;
+  data: Uint8Array;
+}
+
+interface ZipReadEntry {
+  name: string;
+  data: Uint8Array;
 }
 
 interface Sbv2ModelOption {
@@ -310,7 +335,7 @@ interface MCPServer {
 }
 
 type AssetType = 'vrm' | 'bgimage';
-type AdminTab = 'domain' | 'shared-log' | 'knowledge' | 'guide' | 'chronicle' | 'asset' | 'pronunciation' | 'public' | 'mcp';
+type AdminTab = 'domain' | 'shared-log' | 'knowledge' | 'guide' | 'chronicle' | 'asset' | 'pronunciation' | 'public' | 'mcp' | 'backup';
 
 const DEFAULT_GAZE_GREETINGS = [
   '何か御用がありますか？',
@@ -328,6 +353,7 @@ const SHARED_LOG_ALL_USERS = '__all__';
 const SHARED_LOG_ALL_SESSIONS = '__all__';
 const DEFAULT_GUIDE_SLIDE_SECONDS = 10;
 const LATIN_WORD_PATTERN = /https?:\/\/\S+|www\.\S+|[A-Za-z][A-Za-z'-]*/g;
+const GUIDE_PACKAGE_FORMAT = 'arki-guide-package' as const;
 
 interface DomainPromptTemplate {
   id: string;
@@ -443,6 +469,224 @@ function normalizeGuideDeckImageUrls(guide: GuideDeck): GuideDeck {
       url: slide.type === 'image' ? normalizeGuideImageUrl(slide.url) : slide.url,
     })),
   };
+}
+
+function sanitizePackageFileName(raw: string): string {
+  return (raw || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^_+/, '') || 'file';
+}
+
+function getFileNameFromPackagePath(packagePath: string): string {
+  const normalized = packagePath.replace(/\\/g, '/');
+  return sanitizePackageFileName(normalized.split('/').pop() || 'guide-image');
+}
+
+function getImageExtensionFromMimeType(mimeType: string): string {
+  const normalized = mimeType.toLowerCase();
+  if (normalized.includes('png')) return '.png';
+  if (normalized.includes('webp')) return '.webp';
+  if (normalized.includes('gif')) return '.gif';
+  if (normalized.includes('jpeg') || normalized.includes('jpg')) return '.jpg';
+  return '';
+}
+
+function getImageExtensionFromUrl(url: string): string {
+  try {
+    const pathname = new URL(url, typeof window === 'undefined' ? 'http://localhost' : window.location.origin).pathname;
+    const match = pathname.match(/\.(png|jpg|jpeg|webp|gif)$/i);
+    return match ? `.${match[1].toLowerCase()}` : '';
+  } catch {
+    const match = url.match(/\.(png|jpg|jpeg|webp|gif)(?:[?#].*)?$/i);
+    return match ? `.${match[1].toLowerCase()}` : '';
+  }
+}
+
+function inferImageMimeType(fileName: string): string {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  return 'image/jpeg';
+}
+
+function buildPackagedImagePath(slide: GuideSlide, index: number, mimeType: string): string {
+  const ext = getImageExtensionFromMimeType(mimeType) || getImageExtensionFromUrl(slide.url || '') || '.jpg';
+  return `images/page-${String(index + 1).padStart(3, '0')}${ext}`;
+}
+
+function getDosDateTime(date = new Date()): { date: number; time: number } {
+  const year = Math.max(1980, date.getFullYear());
+  const dosDate = ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+  const dosTime = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+  return { date: dosDate, time: dosTime };
+}
+
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let value = i;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value & 1) ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1);
+    }
+    table[i] = value >>> 0;
+  }
+  return table;
+})();
+
+function calculateCrc32(data: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < data.length; i += 1) {
+    crc = CRC32_TABLE[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function writeUint16(view: DataView, offset: number, value: number) {
+  view.setUint16(offset, value, true);
+}
+
+function writeUint32(view: DataView, offset: number, value: number) {
+  view.setUint32(offset, value >>> 0, true);
+}
+
+function concatUint8Arrays(chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const output = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return output;
+}
+
+function toBlobArrayBuffer(data: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(data.length);
+  copy.set(data);
+  return copy.buffer;
+}
+
+function createStoreZip(entries: ZipBuildEntry[]): Blob {
+  const encoder = new TextEncoder();
+  const { date, time } = getDosDateTime();
+  const localChunks: Uint8Array[] = [];
+  const centralChunks: Uint8Array[] = [];
+  let localOffset = 0;
+
+  entries.forEach((entry) => {
+    const fileNameBytes = encoder.encode(entry.name.replace(/\\/g, '/'));
+    const crc32 = calculateCrc32(entry.data);
+
+    const localHeader = new Uint8Array(30 + fileNameBytes.length);
+    const localView = new DataView(localHeader.buffer);
+    writeUint32(localView, 0, 0x04034b50);
+    writeUint16(localView, 4, 20);
+    writeUint16(localView, 6, 0x0800);
+    writeUint16(localView, 8, 0);
+    writeUint16(localView, 10, time);
+    writeUint16(localView, 12, date);
+    writeUint32(localView, 14, crc32);
+    writeUint32(localView, 18, entry.data.length);
+    writeUint32(localView, 22, entry.data.length);
+    writeUint16(localView, 26, fileNameBytes.length);
+    writeUint16(localView, 28, 0);
+    localHeader.set(fileNameBytes, 30);
+
+    const centralHeader = new Uint8Array(46 + fileNameBytes.length);
+    const centralView = new DataView(centralHeader.buffer);
+    writeUint32(centralView, 0, 0x02014b50);
+    writeUint16(centralView, 4, 20);
+    writeUint16(centralView, 6, 20);
+    writeUint16(centralView, 8, 0x0800);
+    writeUint16(centralView, 10, 0);
+    writeUint16(centralView, 12, time);
+    writeUint16(centralView, 14, date);
+    writeUint32(centralView, 16, crc32);
+    writeUint32(centralView, 20, entry.data.length);
+    writeUint32(centralView, 24, entry.data.length);
+    writeUint16(centralView, 28, fileNameBytes.length);
+    writeUint16(centralView, 30, 0);
+    writeUint16(centralView, 32, 0);
+    writeUint16(centralView, 34, 0);
+    writeUint16(centralView, 36, 0);
+    writeUint32(centralView, 38, 0);
+    writeUint32(centralView, 42, localOffset);
+    centralHeader.set(fileNameBytes, 46);
+
+    localChunks.push(localHeader, entry.data);
+    centralChunks.push(centralHeader);
+    localOffset += localHeader.length + entry.data.length;
+  });
+
+  const centralDirectory = concatUint8Arrays(centralChunks);
+  const endHeader = new Uint8Array(22);
+  const endView = new DataView(endHeader.buffer);
+  writeUint32(endView, 0, 0x06054b50);
+  writeUint16(endView, 4, 0);
+  writeUint16(endView, 6, 0);
+  writeUint16(endView, 8, entries.length);
+  writeUint16(endView, 10, entries.length);
+  writeUint32(endView, 12, centralDirectory.length);
+  writeUint32(endView, 16, localOffset);
+  writeUint16(endView, 20, 0);
+
+  return new Blob([...localChunks, centralDirectory, endHeader].map(toBlobArrayBuffer), { type: 'application/zip' });
+}
+
+async function readStoreZip(file: File): Promise<ZipReadEntry[]> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const decoder = new TextDecoder();
+  let endOffset = -1;
+
+  for (let offset = bytes.length - 22; offset >= 0; offset -= 1) {
+    if (view.getUint32(offset, true) === 0x06054b50) {
+      endOffset = offset;
+      break;
+    }
+  }
+
+  if (endOffset < 0) {
+    throw new Error('ZIPの終端情報が見つかりません');
+  }
+
+  const entryCount = view.getUint16(endOffset + 10, true);
+  const centralDirectoryOffset = view.getUint32(endOffset + 16, true);
+  const entries: ZipReadEntry[] = [];
+  let cursor = centralDirectoryOffset;
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (view.getUint32(cursor, true) !== 0x02014b50) {
+      throw new Error('ZIPの中央ディレクトリが不正です');
+    }
+
+    const method = view.getUint16(cursor + 10, true);
+    const compressedSize = view.getUint32(cursor + 20, true);
+    const fileNameLength = view.getUint16(cursor + 28, true);
+    const extraLength = view.getUint16(cursor + 30, true);
+    const commentLength = view.getUint16(cursor + 32, true);
+    const localHeaderOffset = view.getUint32(cursor + 42, true);
+    const fileName = decoder.decode(bytes.slice(cursor + 46, cursor + 46 + fileNameLength));
+
+    if (method !== 0) {
+      throw new Error(`${fileName} は圧縮形式のため読み込めません。Ark-iから書き出したパッケージを使用してください。`);
+    }
+
+    if (view.getUint32(localHeaderOffset, true) !== 0x04034b50) {
+      throw new Error(`${fileName} のローカルヘッダーが不正です`);
+    }
+
+    const localFileNameLength = view.getUint16(localHeaderOffset + 26, true);
+    const localExtraLength = view.getUint16(localHeaderOffset + 28, true);
+    const dataOffset = localHeaderOffset + 30 + localFileNameLength + localExtraLength;
+    entries.push({
+      name: fileName,
+      data: bytes.slice(dataOffset, dataOffset + compressedSize),
+    });
+
+    cursor += 46 + fileNameLength + extraLength + commentLength;
+  }
+
+  return entries;
 }
 
 const DOMAIN_PROMPT_TEMPLATES: DomainPromptTemplate[] = [
@@ -590,12 +834,13 @@ export default function AdminPage() {
   const [selectedKnowledge, setSelectedKnowledge] = useState<Knowledge | null>(null);
   const [guides, setGuides] = useState<GuideDeck[]>([]);
   const [selectedGuide, setSelectedGuide] = useState<GuideDeck | null>(null);
+  const [selectedGuideSlideIndex, setSelectedGuideSlideIndex] = useState(0);
   const [guideTagsInput, setGuideTagsInput] = useState('');
-  const [guideJsonImportInput, setGuideJsonImportInput] = useState('');
   const [savingGuide, setSavingGuide] = useState(false);
   const [guideImageFiles, setGuideImageFiles] = useState<AssetFile[]>([]);
   const [uploadingGuideImageSlideIndex, setUploadingGuideImageSlideIndex] = useState<number | null>(null);
   const [deletingGuideImageUrl, setDeletingGuideImageUrl] = useState<string | null>(null);
+  const guidePackageImportInputRef = useRef<HTMLInputElement>(null);
   const [chronicles, setChronicles] = useState<Chronicle[]>([]);
   const [selectedChronicle, setSelectedChronicle] = useState<Chronicle | null>(null);
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -2713,6 +2958,35 @@ export default function AdminPage() {
     }
   };
 
+  const uploadGuideImageFile = async (file: File, token: string): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch('/api/guide-images', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (handleUnauthorizedResponse(response.status)) {
+      throw new Error('認証が必要です');
+    }
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.error || 'ガイド画像のアップロードに失敗しました');
+    }
+
+    const uploadedUrl = payload?.file?.url;
+    if (typeof uploadedUrl !== 'string') {
+      throw new Error('アップロード後の画像URLを取得できませんでした');
+    }
+
+    return normalizeGuideImageUrl(uploadedUrl);
+  };
+
   const handleUploadGuideImage = async (slideIndex: number, file: File | null) => {
     if (!file) {
       return;
@@ -2728,38 +3002,15 @@ export default function AdminPage() {
       setUploadingGuideImageSlideIndex(slideIndex);
       setMessage('');
 
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/guide-images', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      });
-
-      if (handleUnauthorizedResponse(response.status)) {
-        return;
-      }
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        setMessage(payload?.error || 'ガイド画像のアップロードに失敗しました');
-        return;
-      }
-
-      const uploadedUrl = payload?.file?.url;
-      if (typeof uploadedUrl === 'string') {
-        updateSelectedGuideSlide(slideIndex, { type: 'image', url: uploadedUrl });
-      }
+      const uploadedUrl = await uploadGuideImageFile(file, token);
+      updateSelectedGuideSlide(slideIndex, { type: 'image', url: uploadedUrl });
 
       await loadAllGuideImages(token);
       setMessage('ガイド画像をアップロードしました');
       setTimeout(() => setMessage(''), 3000);
     } catch (err) {
       console.error(err);
-      setMessage('ガイド画像アップロード時にエラーが発生しました');
+      setMessage(err instanceof Error ? err.message : 'ガイド画像アップロード時にエラーが発生しました');
     } finally {
       setUploadingGuideImageSlideIndex(null);
     }
@@ -2922,7 +3173,20 @@ export default function AdminPage() {
 
   useEffect(() => {
     setGuideTagsInput(guideTagsToInput(selectedGuide?.tags));
+    setSelectedGuideSlideIndex(0);
   }, [selectedGuide?.deck_id]);
+
+  useEffect(() => {
+    if (!selectedGuide) {
+      setSelectedGuideSlideIndex(0);
+      return;
+    }
+
+    const lastSlideIndex = Math.max(0, selectedGuide.slides.length - 1);
+    if (selectedGuideSlideIndex > lastSlideIndex) {
+      setSelectedGuideSlideIndex(lastSlideIndex);
+    }
+  }, [selectedGuide?.slides.length, selectedGuideSlideIndex]);
 
   const refreshGuides = async (token: string, preferredId?: string) => {
     const response = await fetch('/api/guides', {
@@ -2998,6 +3262,7 @@ export default function AdminPage() {
       ...selectedGuide,
       slides: [...selectedGuide.slides, nextSlide],
     });
+    setSelectedGuideSlideIndex(selectedGuide.slides.length);
   };
 
   const deleteGuideSlide = (index: number) => {
@@ -3016,6 +3281,44 @@ export default function AdminPage() {
       ...selectedGuide,
       slides,
     });
+    setSelectedGuideSlideIndex(Math.max(0, Math.min(index, slides.length - 1)));
+  };
+
+  const copyGuideSlide = (index: number) => {
+    if (!selectedGuide) {
+      return;
+    }
+
+    const sourceSlide = selectedGuide.slides[index];
+    if (!sourceSlide) {
+      return;
+    }
+
+    const copiedSlide: GuideSlide = {
+      ...sourceSlide,
+      slide_no: index + 2,
+      title: sourceSlide.title ? `${sourceSlide.title} コピー` : `ページ ${index + 2} コピー`,
+      qa: sourceSlide.qa
+        ? {
+            keywords: [...sourceSlide.qa.keywords],
+            context: sourceSlide.qa.context,
+          }
+        : undefined,
+    };
+    const slides = [
+      ...selectedGuide.slides.slice(0, index + 1),
+      copiedSlide,
+      ...selectedGuide.slides.slice(index + 1),
+    ].map((slide, slideIndex) => ({
+      ...slide,
+      slide_no: slideIndex + 1,
+    }));
+
+    setSelectedGuide({
+      ...selectedGuide,
+      slides,
+    });
+    setSelectedGuideSlideIndex(index + 1);
   };
 
   const buildGuidePayload = (guide: GuideDeck): GuideDeck => ({
@@ -3042,9 +3345,7 @@ export default function AdminPage() {
     },
   });
 
-  const guideJsonPreview = selectedGuide
-    ? JSON.stringify(buildGuidePayload(selectedGuide), null, 2)
-    : '';
+  const selectedGuideSlide = selectedGuide?.slides[selectedGuideSlideIndex] || selectedGuide?.slides[0] || null;
 
   const handleSave = async () => {
     if (!selectedDomain) return;
@@ -3382,17 +3683,157 @@ export default function AdminPage() {
     }
   };
 
-  const handleImportGuideJson = () => {
-    if (!guideJsonImportInput.trim()) {
-      setMessage('取り込むJSONを入力してください');
+  const handleDownloadGuidePackage = async () => {
+    if (!selectedGuide) {
       return;
     }
 
     try {
-      const parsed = JSON.parse(guideJsonImportInput);
-      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.slides)) {
-        setMessage('ガイドJSONには slides 配列が必要です');
+      setMessage('ガイドパッケージを作成しています...');
+      const encoder = new TextEncoder();
+      const payload = buildGuidePayload(selectedGuide);
+      const packagedGuide: GuideDeck = {
+        ...payload,
+        slides: payload.slides.map((slide) => ({ ...slide })),
+      };
+      const manifest: GuidePackageManifest = {
+        format: GUIDE_PACKAGE_FORMAT,
+        version: '1.0',
+        exportedAt: new Date().toISOString(),
+        deckId: payload.deck_id,
+        title: payload.title,
+        assets: [],
+      };
+      const zipEntries: ZipBuildEntry[] = [];
+      let skippedImageCount = 0;
+
+      for (const [index, slide] of payload.slides.entries()) {
+        const imageUrl = normalizeGuideImageUrl(slide.url);
+        if (slide.type !== 'image' || !imageUrl) {
+          continue;
+        }
+
+        try {
+          const fetchUrl = new URL(imageUrl, window.location.origin).toString();
+          const response = await fetch(fetchUrl, { cache: 'no-store' });
+          if (!response.ok) {
+            throw new Error(`画像取得に失敗しました: ${response.status}`);
+          }
+
+          const blob = await response.blob();
+          const mimeType = blob.type || inferImageMimeType(imageUrl);
+          const packagePath = buildPackagedImagePath(slide, index, mimeType);
+          zipEntries.push({
+            name: packagePath,
+            data: new Uint8Array(await blob.arrayBuffer()),
+          });
+          packagedGuide.slides[index] = {
+            ...packagedGuide.slides[index],
+            url: packagePath,
+          };
+          manifest.assets.push({
+            slideNo: index + 1,
+            originalUrl: imageUrl,
+            path: packagePath,
+            mimeType,
+            included: true,
+          });
+        } catch (err) {
+          console.warn('Failed to include guide image in package:', err);
+          skippedImageCount += 1;
+          manifest.assets.push({
+            slideNo: index + 1,
+            originalUrl: imageUrl,
+            path: imageUrl,
+            mimeType: inferImageMimeType(imageUrl),
+            included: false,
+          });
+        }
+      }
+
+      zipEntries.unshift(
+        {
+          name: 'guide.json',
+          data: encoder.encode(JSON.stringify(packagedGuide, null, 2)),
+        },
+        {
+          name: 'manifest.json',
+          data: encoder.encode(JSON.stringify(manifest, null, 2)),
+        },
+      );
+
+      const blob = createStoreZip(zipEntries);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${sanitizePackageFileName(payload.deck_id || 'guide')}.arki-guide.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setMessage(skippedImageCount > 0
+        ? `ガイドパッケージを書き出しました。一部画像 ${skippedImageCount} 件は取得できず外部URL参照のままです。`
+        : 'ガイドパッケージを書き出しました');
+      setTimeout(() => setMessage(''), 4000);
+    } catch (err) {
+      console.error(err);
+      setMessage(err instanceof Error ? err.message : 'ガイドパッケージの書き出しに失敗しました');
+    }
+  };
+
+  const handleImportGuidePackage = async (file: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    const token = localStorage.getItem('injection_token');
+    if (!token) {
+      setMessage('認証情報が見つかりません。再ログインしてください');
+      return;
+    }
+
+    try {
+      setMessage('ガイドパッケージを読み込んでいます...');
+      const decoder = new TextDecoder();
+      const entries = await readStoreZip(file);
+      const entryMap = new Map(entries.map((entry) => [entry.name.replace(/\\/g, '/'), entry]));
+      const guideEntry = entryMap.get('guide.json');
+      if (!guideEntry) {
+        setMessage('パッケージ内に guide.json が見つかりません');
         return;
+      }
+
+      const manifestEntry = entryMap.get('manifest.json');
+      const manifest = manifestEntry
+        ? JSON.parse(decoder.decode(manifestEntry.data)) as Partial<GuidePackageManifest>
+        : null;
+      if (manifest && manifest.format && manifest.format !== GUIDE_PACKAGE_FORMAT) {
+        setMessage('Ark-iガイドパッケージではない形式です');
+        return;
+      }
+
+      const parsed = JSON.parse(decoder.decode(guideEntry.data));
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.slides)) {
+        setMessage('guide.json には slides 配列が必要です');
+        return;
+      }
+
+      const uploadedImageUrlMap = new Map<string, string>();
+      const imageEntries = entries.filter((entry) => entry.name.replace(/\\/g, '/').startsWith('images/'));
+
+      for (const entry of imageEntries) {
+        const packagePath = entry.name.replace(/\\/g, '/');
+        const manifestAsset = manifest?.assets?.find((asset) => asset.path === packagePath);
+        const mimeType = manifestAsset?.mimeType || inferImageMimeType(packagePath);
+        const uploadFile = new File(
+          [new Blob([toBlobArrayBuffer(entry.data)], { type: mimeType })],
+          getFileNameFromPackagePath(packagePath),
+          { type: mimeType },
+        );
+        const uploadedUrl = await uploadGuideImageFile(uploadFile, token);
+        uploadedImageUrlMap.set(packagePath, uploadedUrl);
+        uploadedImageUrlMap.set(`./${packagePath}`, uploadedUrl);
       }
 
       const nextGuide = {
@@ -3400,23 +3841,24 @@ export default function AdminPage() {
         ...parsed,
         deck_id: typeof parsed.deck_id === 'string' && parsed.deck_id.trim()
           ? parsed.deck_id.trim()
-          : typeof parsed.guide_id === 'string' && parsed.guide_id.trim()
-            ? parsed.guide_id.trim()
-          : selectedGuide?.deck_id || `ark_i_guide_${guides.length + 1}`,
-        slides: parsed.slides.map((slide: Partial<GuideSlide>, index: number) => ({
-          slide_no: index + 1,
-          type: slide.type === 'web' || slide.type === 'image' || slide.type === 'qa' ? slide.type : 'qa',
-          title: typeof slide.title === 'string' ? slide.title : '',
-          url: typeof slide.url === 'string' ? slide.url : '',
-          display_seconds: Math.max(1, Math.floor(Number(slide.display_seconds) || DEFAULT_GUIDE_SLIDE_SECONDS)),
-          notes: typeof slide.notes === 'string' ? slide.notes : '',
-          qa: {
-            keywords: Array.isArray(slide.qa?.keywords)
-              ? slide.qa.keywords.map((keyword) => String(keyword).trim()).filter(Boolean)
-              : [],
-            context: typeof slide.qa?.context === 'string' ? slide.qa.context : '',
-          },
-        })),
+          : `ark_i_guide_${guides.length + 1}`,
+        slides: parsed.slides.map((slide: Partial<GuideSlide>, index: number) => {
+          const rawUrl = typeof slide.url === 'string' ? slide.url : '';
+          return {
+            slide_no: index + 1,
+            type: slide.type === 'web' || slide.type === 'image' || slide.type === 'qa' ? slide.type : 'qa',
+            title: typeof slide.title === 'string' ? slide.title : '',
+            url: uploadedImageUrlMap.get(rawUrl) || rawUrl,
+            display_seconds: Math.max(1, Math.floor(Number(slide.display_seconds) || DEFAULT_GUIDE_SLIDE_SECONDS)),
+            notes: typeof slide.notes === 'string' ? slide.notes : '',
+            qa: {
+              keywords: Array.isArray(slide.qa?.keywords)
+                ? slide.qa.keywords.map((keyword) => String(keyword).trim()).filter(Boolean)
+                : [],
+              context: typeof slide.qa?.context === 'string' ? slide.qa.context : '',
+            },
+          };
+        }),
         after_guide: {
           mode: parsed.after_guide?.mode === 'qa' || parsed.after_guide?.mode === 'loop' || parsed.after_guide?.mode === 'end'
             ? parsed.after_guide.mode
@@ -3426,32 +3868,15 @@ export default function AdminPage() {
         },
       } as GuideDeck;
 
-      setSelectedGuide(nextGuide);
+      setSelectedGuide(normalizeGuideDeckImageUrls(nextGuide));
       setGuideTagsInput(guideTagsToInput(nextGuide.tags));
-      setGuideJsonImportInput('');
-      setMessage('JSONをフォームへ反映しました。保存すると管理データへ登録されます。');
-      setTimeout(() => setMessage(''), 3000);
+      await loadAllGuideImages(token);
+      setMessage('ガイドパッケージをフォームへ反映しました。保存すると管理データへ登録されます。');
+      setTimeout(() => setMessage(''), 4000);
     } catch (err) {
       console.error(err);
-      setMessage('JSONの解析に失敗しました');
+      setMessage(err instanceof Error ? err.message : 'ガイドパッケージの読み込みに失敗しました');
     }
-  };
-
-  const handleDownloadGuideJson = () => {
-    if (!selectedGuide) {
-      return;
-    }
-
-    const payload = buildGuidePayload(selectedGuide);
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${payload.deck_id || 'guide'}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
   };
 
   const handleCreatePronunciation = async () => {
@@ -4276,40 +4701,19 @@ export default function AdminPage() {
 
             <button
               type="button"
-              onClick={handleExportBackup}
-              disabled={backupBusy}
+              onClick={() => setActiveTab('backup')}
               style={{
                 padding: '8px 14px',
-                backgroundColor: backupBusy ? '#ccc' : '#0ea5e9',
-                color: 'white',
+                backgroundColor: activeTab === 'backup' ? '#0066cc' : '#f0f0f0',
+                color: activeTab === 'backup' ? 'white' : '#000',
                 border: 'none',
                 borderRadius: '4px',
-                cursor: backupBusy ? 'default' : 'pointer',
-                fontWeight: 'bold',
+                cursor: 'pointer',
+                fontWeight: activeTab === 'backup' ? 'bold' : 'normal',
               }}
             >
-              バックアップ保存
+              バックアップ
             </button>
-
-            <label
-              style={{
-                padding: '8px 14px',
-                backgroundColor: backupBusy ? '#ccc' : '#8b5cf6',
-                color: 'white',
-                borderRadius: '4px',
-                cursor: backupBusy ? 'default' : 'pointer',
-                fontWeight: 'bold',
-              }}
-            >
-              バックアップ読込
-              <input
-                type="file"
-                accept="application/json,.json"
-                onChange={handleImportBackup}
-                disabled={backupBusy}
-                style={{ display: 'none' }}
-              />
-            </label>
           </div>
         </div>
 
@@ -6749,7 +7153,7 @@ export default function AdminPage() {
           <>
             <aside style={{ borderRight: '1px solid #ddd', paddingRight: '20px' }}>
               <h3>ガイド一覧</h3>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   onClick={handleCreateGuide}
@@ -6765,6 +7169,33 @@ export default function AdminPage() {
                 >
                   ＋追加
                 </button>
+                <button
+                  type="button"
+                  onClick={() => guidePackageImportInputRef.current?.click()}
+                  style={{
+                    padding: '6px 10px',
+                    backgroundColor: '#2563eb',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  読み込み
+                </button>
+                <input
+                  ref={guidePackageImportInputRef}
+                  type="file"
+                  accept=".zip,.arki-guide.zip,application/zip"
+                  style={{ display: 'none' }}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] || null;
+                    event.target.value = '';
+                    void handleImportGuidePackage(file);
+                  }}
+                />
                 <button
                   type="button"
                   onClick={handleDeleteGuide}
@@ -6811,55 +7242,6 @@ export default function AdminPage() {
                 </ul>
               )}
 
-              <div style={{ marginTop: '18px', paddingTop: '14px', borderTop: '1px solid #e5e7eb' }}>
-                <h3 style={{ marginTop: 0 }}>ガイド画像</h3>
-                <div style={{ marginBottom: '10px', fontSize: '13px', color: '#444' }}>
-                  登録画像: <strong>{guideImageFiles.length}</strong>
-                </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const token = localStorage.getItem('injection_token');
-                    if (!token) {
-                      setMessage('認証情報が見つかりません。再ログインしてください');
-                      return;
-                    }
-                    await loadAllGuideImages(token);
-                    setMessage('ガイド画像一覧を更新しました');
-                    setTimeout(() => setMessage(''), 3000);
-                  }}
-                  style={{
-                    padding: '6px 10px',
-                    backgroundColor: '#2563eb',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    marginBottom: '10px',
-                  }}
-                >
-                  画像一覧を再取得
-                </button>
-                {guideImageFiles.length > 0 && (
-                  <div style={{ display: 'grid', gap: '8px', maxHeight: '220px', overflowY: 'auto' }}>
-                    {guideImageFiles.map((file) => (
-                      <div key={file.url} style={{ display: 'flex', gap: '8px', alignItems: 'center', minWidth: 0 }}>
-                        <img
-                          src={file.url}
-                          alt={file.name}
-                          loading="lazy"
-                          style={{ width: '42px', height: '42px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #e5e7eb', flexShrink: 0 }}
-                        />
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: '12px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</div>
-                          <div style={{ fontSize: '11px', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.url}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
             </aside>
 
             <main>
@@ -7001,110 +7383,192 @@ export default function AdminPage() {
                     </div>
                   </section>
 
-                  <section style={{ padding: '16px', border: '1px solid #b3e5fc', borderRadius: '8px', backgroundColor: '#f3fbff' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '12px' }}>
+                  <section style={{ border: '1px solid #b3e5fc', borderRadius: '8px', backgroundColor: '#f3fbff', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', padding: '12px 14px', borderBottom: '1px solid #cfe8f3', backgroundColor: '#e8f7ff' }}>
                       <div>
                         <h3 style={{ margin: 0 }}>ページ編集</h3>
                         <div style={{ color: '#64748b', fontSize: '13px', marginTop: '4px' }}>
-                          display_seconds 未指定時はAmica側で10秒として扱います。ここでは明示値を保存します。
+                          左のページ一覧から選択して、右側で1ページずつ編集します。
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={addGuideSlide}
-                        style={{
-                          padding: '8px 12px',
-                          backgroundColor: '#0288d1',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          fontWeight: 'bold',
-                        }}
-                      >
-                        ページ追加
-                      </button>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={addGuideSlide}
+                          style={{
+                            padding: '8px 12px',
+                            backgroundColor: '#0288d1',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          ページ追加
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => copyGuideSlide(selectedGuideSlideIndex)}
+                          disabled={!selectedGuideSlide}
+                          style={{
+                            padding: '8px 12px',
+                            backgroundColor: !selectedGuideSlide ? '#ccc' : '#475569',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: !selectedGuideSlide ? 'default' : 'pointer',
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          コピー
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteGuideSlide(selectedGuideSlideIndex)}
+                          disabled={!selectedGuideSlide || selectedGuide.slides.length <= 1}
+                          style={{
+                            padding: '8px 12px',
+                            backgroundColor: !selectedGuideSlide || selectedGuide.slides.length <= 1 ? '#ccc' : '#ef5350',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: !selectedGuideSlide || selectedGuide.slides.length <= 1 ? 'default' : 'pointer',
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          削除
+                        </button>
+                      </div>
                     </div>
 
-                    <div style={{ display: 'grid', gap: '12px' }}>
-                      {selectedGuide.slides.map((slide, index) => (
-                        <article key={`${slide.slide_no}-${index}`} style={{ padding: '14px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '10px' }}>
-                            <strong>ページ {index + 1}</strong>
-                            <button
-                              type="button"
-                              onClick={() => deleteGuideSlide(index)}
-                              disabled={selectedGuide.slides.length <= 1}
-                              style={{
-                                padding: '6px 10px',
-                                backgroundColor: selectedGuide.slides.length <= 1 ? '#ccc' : '#ef5350',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: selectedGuide.slides.length <= 1 ? 'default' : 'pointer',
-                              }}
-                            >
-                              削除
-                            </button>
-                          </div>
-
-                          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 140px', gap: '10px', marginBottom: '10px' }}>
-                            <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
-                              type
-                              <select
-                                value={slide.type}
-                                onChange={(e) => updateSelectedGuideSlide(index, { type: e.target.value as GuideSlideType })}
-                                style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                    <div style={{ display: 'grid', gridTemplateColumns: '220px minmax(0, 1fr)', minHeight: '560px' }}>
+                      <aside style={{ borderRight: '1px solid #d7dee7', backgroundColor: '#eef2f7', padding: '10px', overflowY: 'auto', maxHeight: '720px' }}>
+                        <div style={{ display: 'grid', gap: '10px' }}>
+                          {selectedGuide.slides.map((slide, index) => {
+                            const isSelected = index === selectedGuideSlideIndex;
+                            const imageUrl = slide.type === 'image' ? normalizeGuideImageUrl(slide.url) : '';
+                            return (
+                              <button
+                                key={`${slide.slide_no}-${index}`}
+                                type="button"
+                                onClick={() => setSelectedGuideSlideIndex(index)}
+                                style={{
+                                  display: 'grid',
+                                  gridTemplateColumns: '28px minmax(0, 1fr)',
+                                  gap: '8px',
+                                  width: '100%',
+                                  padding: '8px',
+                                  textAlign: 'left',
+                                  border: isSelected ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                                  borderRadius: '6px',
+                                  backgroundColor: isSelected ? '#ffffff' : '#f8fafc',
+                                  boxShadow: isSelected ? '0 4px 12px rgba(37, 99, 235, 0.18)' : 'none',
+                                  cursor: 'pointer',
+                                }}
                               >
-                                <option value="web">web</option>
-                                <option value="image">image</option>
-                                <option value="qa">qa</option>
-                              </select>
-                            </label>
-                            <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
-                              title
-                              <input
-                                type="text"
-                                value={slide.title || ''}
-                                onChange={(e) => updateSelectedGuideSlide(index, { title: e.target.value })}
-                                placeholder="任意"
-                                style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-                              />
-                            </label>
-                            <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
-                              表示秒数
-                              <input
-                                type="number"
-                                min={1}
-                                step={1}
-                                value={slide.display_seconds || DEFAULT_GUIDE_SLIDE_SECONDS}
-                                onChange={(e) =>
-                                  updateSelectedGuideSlide(index, {
-                                    display_seconds: Math.max(1, Math.floor(Number(e.target.value) || DEFAULT_GUIDE_SLIDE_SECONDS)),
-                                  })
-                                }
-                                style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-                              />
-                            </label>
-                          </div>
+                                <span style={{ color: isSelected ? '#1d4ed8' : '#64748b', fontSize: '12px', fontWeight: 700, paddingTop: '2px' }}>
+                                  {index + 1}
+                                </span>
+                                <span style={{ minWidth: 0 }}>
+                                  <span style={{ display: 'block', aspectRatio: '16 / 9', border: '1px solid #d7dee7', borderRadius: '4px', backgroundColor: '#fff', overflow: 'hidden', marginBottom: '6px' }}>
+                                    {imageUrl ? (
+                                      <img
+                                        src={imageUrl}
+                                        alt={slide.title || `ページ ${index + 1}`}
+                                        loading="lazy"
+                                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                      />
+                                    ) : (
+                                      <span style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '12px', fontWeight: 700 }}>
+                                        {slide.type.toUpperCase()}
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: '6px', alignItems: 'center', minWidth: 0 }}>
+                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', fontWeight: 700 }}>
+                                      {slide.title || `ページ ${index + 1}`}
+                                    </span>
+                                    <span style={{ flexShrink: 0, color: '#64748b', fontSize: '10px' }}>{slide.type}</span>
+                                  </span>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </aside>
 
-                          <div style={{ display: 'grid', gap: '8px', marginBottom: '10px' }}>
+                      <div style={{ padding: '16px', backgroundColor: '#fff', minWidth: 0 }}>
+                        {selectedGuideSlide ? (
+                          <div style={{ display: 'grid', gap: '12px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
+                              <div>
+                                <h4 style={{ margin: 0, fontSize: '18px' }}>ページ {selectedGuideSlideIndex + 1}</h4>
+                                <div style={{ color: '#64748b', fontSize: '13px', marginTop: '4px' }}>
+                                  display_seconds 未指定時はAmica側で10秒として扱います。ここでは明示値を保存します。
+                                </div>
+                              </div>
+                              <div style={{ color: '#64748b', fontSize: '12px' }}>
+                                {selectedGuide.slides.length}ページ中 {selectedGuideSlideIndex + 1}ページ
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '120px minmax(0, 1fr) 140px', gap: '10px' }}>
+                              <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                                type
+                                <select
+                                  value={selectedGuideSlide.type}
+                                  onChange={(e) => updateSelectedGuideSlide(selectedGuideSlideIndex, { type: e.target.value as GuideSlideType })}
+                                  style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                                >
+                                  <option value="web">web</option>
+                                  <option value="image">image</option>
+                                  <option value="qa">qa</option>
+                                </select>
+                              </label>
+                              <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                                title
+                                <input
+                                  type="text"
+                                  value={selectedGuideSlide.title || ''}
+                                  onChange={(e) => updateSelectedGuideSlide(selectedGuideSlideIndex, { title: e.target.value })}
+                                  placeholder="任意"
+                                  style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                                />
+                              </label>
+                              <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                                表示秒数
+                                <input
+                                  type="number"
+                                  min={1}
+                                  step={1}
+                                  value={selectedGuideSlide.display_seconds || DEFAULT_GUIDE_SLIDE_SECONDS}
+                                  onChange={(e) =>
+                                    updateSelectedGuideSlide(selectedGuideSlideIndex, {
+                                      display_seconds: Math.max(1, Math.floor(Number(e.target.value) || DEFAULT_GUIDE_SLIDE_SECONDS)),
+                                    })
+                                  }
+                                  style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                                />
+                              </label>
+                            </div>
+
                             <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
                               URL（web/imageページで使用）
                               <input
                                 type="url"
-                                value={normalizeGuideImageUrl(slide.url)}
-                                onChange={(e) => updateSelectedGuideSlide(index, { url: e.target.value })}
+                                value={normalizeGuideImageUrl(selectedGuideSlide.url)}
+                                onChange={(e) => updateSelectedGuideSlide(selectedGuideSlideIndex, { url: e.target.value })}
                                 placeholder="https://example.com"
                                 style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
                               />
                             </label>
 
-                            {slide.type === 'image' && (
+                            {selectedGuideSlide.type === 'image' && (
                               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: '8px', alignItems: 'center' }}>
                                 <select
-                                  value={normalizeGuideImageUrl(slide.url)}
-                                  onChange={(e) => updateSelectedGuideSlide(index, { url: e.target.value })}
+                                  value={normalizeGuideImageUrl(selectedGuideSlide.url)}
+                                  onChange={(e) => updateSelectedGuideSlide(selectedGuideSlideIndex, { url: e.target.value })}
                                   style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', minWidth: 0 }}
                                 >
                                   <option value="">アップロード済みガイド画像から選択</option>
@@ -7119,163 +7583,112 @@ export default function AdminPage() {
                                     padding: '8px 10px',
                                     border: '1px solid #cbd5e1',
                                     borderRadius: '4px',
-                                    backgroundColor: uploadingGuideImageSlideIndex === index ? '#eee' : '#f8fafc',
-                                    cursor: uploadingGuideImageSlideIndex === index ? 'default' : 'pointer',
+                                    backgroundColor: uploadingGuideImageSlideIndex === selectedGuideSlideIndex ? '#eee' : '#f8fafc',
+                                    cursor: uploadingGuideImageSlideIndex === selectedGuideSlideIndex ? 'default' : 'pointer',
                                     fontSize: '12px',
                                     whiteSpace: 'nowrap',
                                   }}
                                 >
-                                  {uploadingGuideImageSlideIndex === index ? 'アップロード中...' : '画像をアップロード'}
+                                  {uploadingGuideImageSlideIndex === selectedGuideSlideIndex ? 'アップロード中...' : '画像をアップロード'}
                                   <input
                                     type="file"
                                     accept=".png,.jpg,.jpeg,.webp,.gif"
-                                    disabled={uploadingGuideImageSlideIndex === index}
+                                    disabled={uploadingGuideImageSlideIndex === selectedGuideSlideIndex}
                                     style={{ display: 'none' }}
                                     onChange={(event) => {
                                       const file = event.target.files?.[0] || null;
                                       event.target.value = '';
-                                      void handleUploadGuideImage(index, file);
+                                      void handleUploadGuideImage(selectedGuideSlideIndex, file);
                                     }}
                                   />
                                 </label>
                                 <button
                                   type="button"
-                                  disabled={!isGuideImageUrl(slide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(slide.url)}
-                                  onClick={() => void handleDeleteGuideImage(normalizeGuideImageUrl(slide.url))}
+                                  disabled={!isGuideImageUrl(selectedGuideSlide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(selectedGuideSlide.url)}
+                                  onClick={() => void handleDeleteGuideImage(normalizeGuideImageUrl(selectedGuideSlide.url))}
                                   style={{
                                     padding: '8px 10px',
                                     border: '1px solid #f3b4b4',
                                     borderRadius: '4px',
-                                    backgroundColor: !isGuideImageUrl(slide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(slide.url) ? '#f3f4f6' : '#fff1f2',
-                                    color: !isGuideImageUrl(slide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(slide.url) ? '#999' : '#b91c1c',
-                                    cursor: !isGuideImageUrl(slide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(slide.url) ? 'default' : 'pointer',
+                                    backgroundColor: !isGuideImageUrl(selectedGuideSlide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(selectedGuideSlide.url) ? '#f3f4f6' : '#fff1f2',
+                                    color: !isGuideImageUrl(selectedGuideSlide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(selectedGuideSlide.url) ? '#999' : '#b91c1c',
+                                    cursor: !isGuideImageUrl(selectedGuideSlide.url) || deletingGuideImageUrl === normalizeGuideImageUrl(selectedGuideSlide.url) ? 'default' : 'pointer',
                                     fontSize: '12px',
                                     whiteSpace: 'nowrap',
                                   }}
                                 >
-                                  {deletingGuideImageUrl === normalizeGuideImageUrl(slide.url) ? '削除中...' : '画像削除'}
+                                  {deletingGuideImageUrl === normalizeGuideImageUrl(selectedGuideSlide.url) ? '削除中...' : '画像削除'}
                                 </button>
                               </div>
                             )}
 
-                            {slide.type === 'image' && slide.url && (
-                              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px', border: '1px solid #e5e7eb', borderRadius: '4px', backgroundColor: '#f8fafc' }}>
+                            {selectedGuideSlide.type === 'image' && selectedGuideSlide.url && (
+                              <div style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '10px', border: '1px solid #e5e7eb', borderRadius: '6px', backgroundColor: '#f8fafc' }}>
                                 <img
-                                  src={normalizeGuideImageUrl(slide.url)}
-                                  alt={slide.title || `ページ ${index + 1} 画像`}
+                                  src={normalizeGuideImageUrl(selectedGuideSlide.url)}
+                                  alt={selectedGuideSlide.title || `ページ ${selectedGuideSlideIndex + 1} 画像`}
                                   loading="lazy"
-                                  style={{ width: '96px', height: '56px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #d7dee7', backgroundColor: '#fff', flexShrink: 0 }}
+                                  style={{ width: '180px', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: '4px', border: '1px solid #d7dee7', backgroundColor: '#fff', flexShrink: 0 }}
                                 />
                                 <div style={{ minWidth: 0 }}>
                                   <div style={{ fontSize: '12px', fontWeight: 600 }}>画像プレビュー</div>
-                                  <div style={{ fontSize: '12px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{normalizeGuideImageUrl(slide.url)}</div>
+                                  <div style={{ fontSize: '12px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{normalizeGuideImageUrl(selectedGuideSlide.url)}</div>
                                 </div>
                               </div>
                             )}
-                          </div>
 
-                          <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
-                            読み上げノート
-                            <textarea
-                              value={slide.notes}
-                              onChange={(e) => updateSelectedGuideSlide(index, { notes: e.target.value })}
-                              rows={4}
-                              placeholder="このページでAmicaに読み上げさせる内容"
-                              style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', resize: 'vertical', lineHeight: 1.6 }}
-                            />
-                          </label>
-
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
                             <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
-                              QAキーワード（カンマ区切り）
-                              <input
-                                type="text"
-                                value={(slide.qa?.keywords || []).join(', ')}
-                                onChange={(e) =>
-                                  updateSelectedGuideSlide(index, {
-                                    qa: {
-                                      keywords: e.target.value.split(',').map((item) => item.trimStart()),
-                                      context: slide.qa?.context || '',
-                                    },
-                                  })
-                                }
-                                placeholder="構成, MCP, BEYOND-Core, Amica"
-                                style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
-                              />
-                            </label>
-                            <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
-                              QAコンテキスト
+                              読み上げノート
                               <textarea
-                                value={slide.qa?.context || ''}
-                                onChange={(e) =>
-                                  updateSelectedGuideSlide(index, {
-                                    qa: {
-                                      keywords: slide.qa?.keywords || [],
-                                      context: e.target.value,
-                                    },
-                                  })
-                                }
-                                rows={3}
-                                placeholder="このページに関連する質問へ回答するときの補足情報"
+                                value={selectedGuideSlide.notes}
+                                onChange={(e) => updateSelectedGuideSlide(selectedGuideSlideIndex, { notes: e.target.value })}
+                                rows={7}
+                                placeholder="このページでAmicaに読み上げさせる内容"
                                 style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', resize: 'vertical', lineHeight: 1.6 }}
                               />
                             </label>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '10px' }}>
+                              <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                                QAキーワード（カンマ区切り）
+                                <input
+                                  type="text"
+                                  value={(selectedGuideSlide.qa?.keywords || []).join(', ')}
+                                  onChange={(e) =>
+                                    updateSelectedGuideSlide(selectedGuideSlideIndex, {
+                                      qa: {
+                                        keywords: e.target.value.split(',').map((item) => item.trimStart()),
+                                        context: selectedGuideSlide.qa?.context || '',
+                                      },
+                                    })
+                                  }
+                                  placeholder="構成, MCP, BEYOND-Core, Amica"
+                                  style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                                />
+                              </label>
+                              <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+                                QAコンテキスト
+                                <textarea
+                                  value={selectedGuideSlide.qa?.context || ''}
+                                  onChange={(e) =>
+                                    updateSelectedGuideSlide(selectedGuideSlideIndex, {
+                                      qa: {
+                                        keywords: selectedGuideSlide.qa?.keywords || [],
+                                        context: e.target.value,
+                                      },
+                                    })
+                                  }
+                                  rows={4}
+                                  placeholder="このページに関連する質問へ回答するときの補足情報"
+                                  style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', resize: 'vertical', lineHeight: 1.6 }}
+                                />
+                              </label>
+                            </div>
                           </div>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-
-                  <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '16px' }}>
-                    <div style={{ minWidth: 0, padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
-                      <h3 style={{ marginTop: 0 }}>JSON取り込み</h3>
-                      <textarea
-                        value={guideJsonImportInput}
-                        onChange={(e) => setGuideJsonImportInput(e.target.value)}
-                        rows={12}
-                        placeholder="既存のDeck JSONを貼り付け"
-                        style={{ width: '100%', boxSizing: 'border-box', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '4px', fontFamily: 'monospace', fontSize: '12px' }}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleImportGuideJson}
-                        style={{
-                          marginTop: '10px',
-                          padding: '8px 12px',
-                          backgroundColor: '#0f766e',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          fontWeight: 'bold',
-                        }}
-                      >
-                        JSONをフォームへ反映
-                      </button>
-                    </div>
-
-                    <div style={{ minWidth: 0, padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-                        <h3 style={{ margin: 0 }}>JSONプレビュー</h3>
-                        <button
-                          type="button"
-                          onClick={handleDownloadGuideJson}
-                          style={{
-                            padding: '6px 10px',
-                            backgroundColor: '#334155',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                          }}
-                        >
-                          ダウンロード
-                        </button>
+                        ) : (
+                          <div style={{ padding: '24px', color: '#64748b' }}>ページを追加してください</div>
+                        )}
                       </div>
-                      <pre style={{ margin: 0, maxWidth: '100%', boxSizing: 'border-box', maxHeight: '360px', overflow: 'auto', padding: '12px', borderRadius: '6px', backgroundColor: '#0f172a', color: '#e2e8f0', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                        {guideJsonPreview}
-                      </pre>
                     </div>
                   </section>
 
@@ -7308,6 +7721,21 @@ export default function AdminPage() {
                       }}
                     >
                       {savingGuide ? '保存中...' : 'ガイド保存'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadGuidePackage}
+                      style={{
+                        padding: '10px 20px',
+                        backgroundColor: '#2563eb',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                      }}
+                    >
+                      パッケージ書き出し
                     </button>
                   </div>
                 </div>
@@ -8664,6 +9092,65 @@ export default function AdminPage() {
               </div>
             </main>
           </>
+        ) : activeTab === 'backup' ? (
+          <main style={{ gridColumn: '1 / -1' }}>
+            <h2 style={{ marginTop: 0 }}>バックアップ</h2>
+            <p style={{ color: '#555', lineHeight: 1.7, maxWidth: '760px' }}>
+              管理データ全体の保存と復元を行います。復元は現在のドメイン、ナレッジ、ガイドなどの管理データをバックアップ内容で置き換えるため、実行前に現在のバックアップ保存を推奨します。
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '16px', alignItems: 'stretch' }}>
+              <section style={{ padding: '18px', border: '1px solid #bfdbfe', borderRadius: '8px', backgroundColor: '#eff6ff' }}>
+                <h3 style={{ marginTop: 0 }}>バックアップ保存</h3>
+                <p style={{ color: '#475569', lineHeight: 1.7 }}>
+                  現在の管理データをJSONファイルとして保存します。設定変更や大きなデータ更新の前に取得しておくと復元できます。
+                </p>
+                <button
+                  type="button"
+                  onClick={handleExportBackup}
+                  disabled={backupBusy}
+                  style={{
+                    padding: '10px 16px',
+                    backgroundColor: backupBusy ? '#ccc' : '#0ea5e9',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: backupBusy ? 'default' : 'pointer',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {backupBusy ? '処理中...' : 'バックアップ保存'}
+                </button>
+              </section>
+
+              <section style={{ padding: '18px', border: '1px solid #ddd6fe', borderRadius: '8px', backgroundColor: '#f5f3ff' }}>
+                <h3 style={{ marginTop: 0 }}>バックアップ読込</h3>
+                <p style={{ color: '#475569', lineHeight: 1.7 }}>
+                  保存済みのバックアップJSONを読み込み、管理データを復元します。現在のデータは置き換えられます。
+                </p>
+                <label
+                  style={{
+                    display: 'inline-block',
+                    padding: '10px 16px',
+                    backgroundColor: backupBusy ? '#ccc' : '#8b5cf6',
+                    color: 'white',
+                    borderRadius: '4px',
+                    cursor: backupBusy ? 'default' : 'pointer',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {backupBusy ? '処理中...' : 'バックアップ読込'}
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={handleImportBackup}
+                    disabled={backupBusy}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+              </section>
+            </div>
+          </main>
         ) : activeTab === 'mcp' ? (
           <>
             <aside style={{ borderRight: '1px solid #ddd', paddingRight: '20px' }}>
