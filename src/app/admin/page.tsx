@@ -335,7 +335,7 @@ interface MCPServer {
 }
 
 type AssetType = 'vrm' | 'bgimage';
-type AdminTab = 'domain' | 'shared-log' | 'knowledge' | 'guide' | 'chronicle' | 'asset' | 'pronunciation' | 'public' | 'mcp' | 'backup';
+type AdminTab = 'domain' | 'dashboard' | 'shared-log' | 'knowledge' | 'guide' | 'chronicle' | 'asset' | 'pronunciation' | 'public' | 'mcp' | 'backup';
 
 const DEFAULT_GAZE_GREETINGS = [
   '何か御用がありますか？',
@@ -767,6 +767,33 @@ function formatAdminTimestamp(value: number): string {
   return new Date(value).toLocaleString('ja-JP');
 }
 
+function getDashboardTimestamp(value: unknown): number {
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0;
+}
+
+function getDashboardDomainId(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : '__unknown_domain__';
+}
+
+function getDashboardDomainName(domainId: string, domainNameById: Map<string, string>): string {
+  if (domainNameById.has(domainId)) {
+    return domainNameById.get(domainId) || domainId;
+  }
+
+  // 削除済みドメインのログも全体集計では残るため、落とさず識別できる表示にする。
+  return domainId === '__unknown_domain__' ? '不明なドメイン' : `${domainId}（削除済み）`;
+}
+
+function getDashboardDayKey(log: SharedLogEntry): string {
+  if (typeof log.createdAtDayKey === 'string' && log.createdAtDayKey.trim()) {
+    return log.createdAtDayKey.trim();
+  }
+
+  const timestamp = getDashboardTimestamp(log.createdAt);
+  return timestamp > 0 ? new Date(timestamp).toISOString().slice(0, 10) : '日付不明';
+}
+
 function formatSharedLogRoleLabel(role: SharedLogEntry['role']): string {
   if (role === 'user') {
     return 'あなた';
@@ -777,6 +804,48 @@ function formatSharedLogRoleLabel(role: SharedLogEntry['role']): string {
   }
 
   return 'システム';
+}
+
+function parseEmotionTaggedContent(content: string): { emotion: string; text: string } {
+  const match = content.match(/^\s*\[(neutral|joyful|sad|angry)\]\s*/i);
+  if (!match) {
+    return { emotion: '', text: content };
+  }
+
+  return {
+    emotion: match[1].toLowerCase(),
+    text: content.slice(match[0].length),
+  };
+}
+
+function renderEmotionTaggedContent(content: string) {
+  const parsed = parseEmotionTaggedContent(content);
+
+  if (!parsed.emotion) {
+    return <>{content}</>;
+  }
+
+  return (
+    <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '1px 7px',
+          borderRadius: '9999px',
+          backgroundColor: '#e0f2fe',
+          color: '#0369a1',
+          fontSize: '11px',
+          fontWeight: 700,
+          lineHeight: 1.6,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {parsed.emotion}
+      </span>
+      <span>{parsed.text}</span>
+    </span>
+  );
 }
 
 function createDownloadTimestamp(): string {
@@ -868,6 +937,10 @@ export default function AdminPage() {
   const [sharedLogFilterSessionId, setSharedLogFilterSessionId] = useState(SHARED_LOG_ALL_SESSIONS);
   const [sharedLogAvailableSessionIds, setSharedLogAvailableSessionIds] = useState<string[]>([]);
   const [expandedSharedLogId, setExpandedSharedLogId] = useState<string | null>(null);
+  const [dashboardDomainId, setDashboardDomainId] = useState(SHARED_LOG_ALL_DOMAINS);
+  const [dashboardLogs, setDashboardLogs] = useState<SharedLogEntry[]>([]);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardError, setDashboardError] = useState('');
   const [runtimeModelInfo, setRuntimeModelInfo] = useState<RuntimeModelInfo | null>(null);
   const [runtimeInfoError, setRuntimeInfoError] = useState('');
   const [runtimeInfoLoading, setRuntimeInfoLoading] = useState(false);
@@ -1177,6 +1250,85 @@ export default function AdminPage() {
     () => [...sharedLogs].sort((left, right) => right.createdAt - left.createdAt),
     [sharedLogs],
   );
+
+  const dashboardMetrics = useMemo(() => {
+    const userMessages = dashboardLogs.filter((log) => log.role === 'user');
+    const uniqueUsers = new Set<string>();
+    const uniqueSessions = new Set<string>();
+    const domainCounts = new Map<string, number>();
+    const dayCounts = new Map<string, number>();
+    const questionCounts = new Map<string, { text: string; count: number; latestAt: number }>();
+    let mcpUsedCount = 0;
+
+    for (const log of dashboardLogs) {
+      if (log.userId) {
+        uniqueUsers.add(log.userId);
+      }
+      if (log.sessionId) {
+        uniqueSessions.add(log.sessionId);
+      }
+      const domainId = getDashboardDomainId(log.domainId);
+      const dayKey = getDashboardDayKey(log);
+      domainCounts.set(domainId, (domainCounts.get(domainId) || 0) + 1);
+      dayCounts.set(dayKey, (dayCounts.get(dayKey) || 0) + 1);
+      if (log.mcpInfo?.used) {
+        mcpUsedCount += 1;
+      }
+    }
+
+    for (const log of userMessages) {
+      const normalizedQuestion = parseEmotionTaggedContent(String(log.content || '')).text.replace(/\s+/g, ' ').trim();
+      if (!normalizedQuestion) {
+        continue;
+      }
+      const createdAt = getDashboardTimestamp(log.createdAt);
+      const current = questionCounts.get(normalizedQuestion);
+      questionCounts.set(normalizedQuestion, {
+        text: normalizedQuestion,
+        count: (current?.count || 0) + 1,
+        latestAt: Math.max(current?.latestAt || 0, createdAt),
+      });
+    }
+
+    const latestAt = dashboardLogs.reduce((latest, log) => Math.max(latest, getDashboardTimestamp(log.createdAt)), 0);
+    const firstAt = dashboardLogs.reduce((oldest, log) => {
+      const createdAt = getDashboardTimestamp(log.createdAt);
+      if (createdAt === 0) {
+        return oldest;
+      }
+      return oldest === 0 ? createdAt : Math.min(oldest, createdAt);
+    }, 0);
+    const domainNameById = new Map(domains.map((domain) => [domain.id, domain.name]));
+
+    return {
+      totalMessages: dashboardLogs.length,
+      userMessageCount: userMessages.length,
+      assistantMessageCount: dashboardLogs.filter((log) => log.role === 'assistant').length,
+      uniqueUserCount: uniqueUsers.size,
+      uniqueSessionCount: uniqueSessions.size,
+      mcpUsedCount,
+      firstAt,
+      latestAt,
+      questionRanking: Array.from(questionCounts.values())
+        .sort((a, b) => b.count - a.count || b.latestAt - a.latestAt)
+        .slice(0, 20),
+      dailyUsage: Array.from(dayCounts.entries())
+        .map(([day, count]) => ({ day, count }))
+        .sort((a, b) => String(a.day).localeCompare(String(b.day)))
+        .slice(-14),
+      domainUsage: Array.from(domainCounts.entries())
+        .map(([domainId, count]) => ({
+          domainId,
+          domainName: getDashboardDomainName(domainId, domainNameById),
+          count,
+        }))
+        .sort((a, b) => b.count - a.count),
+      recentQuestions: userMessages
+        .slice()
+        .sort((a, b) => getDashboardTimestamp(b.createdAt) - getDashboardTimestamp(a.createdAt))
+        .slice(0, 10),
+    };
+  }, [dashboardLogs, domains]);
 
   const loadAllData = async (token: string) => {
     const [domainsRes, knowledgesRes, guidesRes, chroniclesRes, pronunciationsRes, pronunciationSettingsRes, memoriesRes] = await Promise.all([
@@ -2581,6 +2733,64 @@ export default function AdminPage() {
       limit: sharedLogsLimit,
     });
   }, [activeTab, effectiveSharedLogDomainId, effectiveSharedLogUserId, effectiveSharedLogSessionId, sharedLogsLimit]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('injection_token');
+    if (!token || activeTab !== 'dashboard') {
+      return;
+    }
+
+    let cancelled = false;
+    const loadDashboardLogs = async () => {
+      try {
+        setDashboardLoading(true);
+        setDashboardError('');
+
+        const params = new URLSearchParams();
+        params.set('all', 'true');
+        if (dashboardDomainId && dashboardDomainId !== SHARED_LOG_ALL_DOMAINS) {
+          params.set('domainId', dashboardDomainId);
+        }
+
+        const response = await fetch(`/api/domain-chat-history?${params.toString()}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          cache: 'no-store',
+        });
+
+        if (handleUnauthorizedResponse(response.status)) {
+          return;
+        }
+
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(payload?.error || 'チャットログの取得に失敗しました');
+        }
+
+        if (!cancelled) {
+          setDashboardLogs(Array.isArray(payload?.items) ? payload.items : []);
+        }
+      } catch (error) {
+        console.error('Dashboard log load error:', error);
+        if (!cancelled) {
+          setDashboardLogs([]);
+          setDashboardError(error instanceof Error ? error.message : 'チャットログの取得に失敗しました');
+        }
+      } finally {
+        if (!cancelled) {
+          setDashboardLoading(false);
+        }
+      }
+    };
+
+    void loadDashboardLogs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, dashboardDomainId]);
 
   useEffect(() => {
     if (sharedLogFilterDomainId === SHARED_LOG_ALL_DOMAINS || !sharedLogFilterDomainId) {
@@ -4573,6 +4783,22 @@ export default function AdminPage() {
 
             <button
               type="button"
+              onClick={() => setActiveTab('dashboard')}
+              style={{
+                padding: '8px 14px',
+                backgroundColor: activeTab === 'dashboard' ? '#0066cc' : '#f0f0f0',
+                color: activeTab === 'dashboard' ? 'white' : '#000',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: activeTab === 'dashboard' ? 'bold' : 'normal',
+              }}
+            >
+              ダッシュボード
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveTab('knowledge')}
               style={{
                 padding: '8px 14px',
@@ -4733,7 +4959,135 @@ export default function AdminPage() {
       </header>
 
       <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: '20px' }}>
-        {activeTab === 'domain' ? (
+        {activeTab === 'dashboard' ? (
+          <main style={{ gridColumn: '1 / -1' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: '16px' }}>
+              <div>
+                <h2 style={{ margin: 0 }}>チャットログダッシュボード</h2>
+                <p style={{ color: '#555', lineHeight: 1.7, marginBottom: 0 }}>
+                  保存済みチャットログから、利用状況、ユーザー数、よく聞かれている質問を集計します。
+                </p>
+              </div>
+              <label style={{ display: 'grid', gap: '4px', fontWeight: 600, minWidth: '260px' }}>
+                対象ドメイン
+                <select
+                  value={dashboardDomainId}
+                  onChange={(e) => setDashboardDomainId(e.target.value)}
+                  style={{ padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                >
+                  <option value={SHARED_LOG_ALL_DOMAINS}>全ドメイン</option>
+                  {domains.map((domain) => (
+                    <option key={domain.id} value={domain.id}>
+                      {domain.name} ({domain.id})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {dashboardError && (
+              <div style={{ marginBottom: '16px', padding: '10px', backgroundColor: '#ffebee', color: '#c62828', borderRadius: '4px' }}>
+                {dashboardError}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
+              {[
+                ['総メッセージ', dashboardMetrics.totalMessages],
+                ['ユーザー発話', dashboardMetrics.userMessageCount],
+                ['AI応答', dashboardMetrics.assistantMessageCount],
+                ['ユーザー数', dashboardMetrics.uniqueUserCount],
+                ['セッション数', dashboardMetrics.uniqueSessionCount],
+                ['MCP利用', dashboardMetrics.mcpUsedCount],
+              ].map(([label, value]) => (
+                <div key={label} style={{ padding: '14px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
+                  <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>{label}</div>
+                  <div style={{ marginTop: '6px', fontSize: '26px', fontWeight: 800 }}>{value}</div>
+                </div>
+              ))}
+            </div>
+
+            {dashboardLoading ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>チャットログを集計中です...</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '16px' }}>
+                <section style={{ padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
+                  <h3 style={{ marginTop: 0 }}>日別利用状況</h3>
+                  {dashboardMetrics.dailyUsage.length === 0 ? (
+                    <p style={{ color: '#64748b' }}>表示できるログがありません</p>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '8px' }}>
+                      {dashboardMetrics.dailyUsage.map((item) => {
+                        const max = Math.max(...dashboardMetrics.dailyUsage.map((row) => row.count), 1);
+                        return (
+                          <div key={item.day} style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr) 60px', gap: '8px', alignItems: 'center' }}>
+                            <span style={{ fontSize: '12px', color: '#475569' }}>{item.day}</span>
+                            <span style={{ height: '10px', borderRadius: '999px', backgroundColor: '#e2e8f0', overflow: 'hidden' }}>
+                              <span style={{ display: 'block', height: '100%', width: `${Math.max(4, Math.round((item.count / max) * 100))}%`, backgroundColor: '#2563eb' }} />
+                            </span>
+                            <strong style={{ textAlign: 'right' }}>{item.count}</strong>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                <section style={{ padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
+                  <h3 style={{ marginTop: 0 }}>ドメイン別利用</h3>
+                  {dashboardMetrics.domainUsage.length === 0 ? (
+                    <p style={{ color: '#64748b' }}>表示できるログがありません</p>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '8px' }}>
+                      {dashboardMetrics.domainUsage.slice(0, 10).map((item) => (
+                        <div key={item.domainId} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', padding: '8px', borderRadius: '6px', backgroundColor: '#f8fafc' }}>
+                          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.domainName}</span>
+                          <strong>{item.count}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section style={{ padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
+                  <h3 style={{ marginTop: 0 }}>質問ランキング</h3>
+                  {dashboardMetrics.questionRanking.length === 0 ? (
+                    <p style={{ color: '#64748b' }}>ユーザー質問がまだありません</p>
+                  ) : (
+                    <ol style={{ margin: 0, paddingLeft: '22px', display: 'grid', gap: '10px' }}>
+                      {dashboardMetrics.questionRanking.map((item) => (
+                        <li key={item.text}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                            <span style={{ overflowWrap: 'anywhere' }}>{item.text}</span>
+                            <strong style={{ flexShrink: 0 }}>{item.count}回</strong>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </section>
+
+                <section style={{ padding: '16px', border: '1px solid #d7dee7', borderRadius: '8px', backgroundColor: '#fff' }}>
+                  <h3 style={{ marginTop: 0 }}>最近の質問</h3>
+                  {dashboardMetrics.recentQuestions.length === 0 ? (
+                    <p style={{ color: '#64748b' }}>ユーザー質問がまだありません</p>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '10px' }}>
+                      {dashboardMetrics.recentQuestions.map((log) => (
+                        <div key={log.historyId} style={{ padding: '10px', borderRadius: '6px', backgroundColor: '#f8fafc' }}>
+                          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>
+                            {formatAdminTimestamp(getDashboardTimestamp(log.createdAt))} / {log.userId || 'unknown'}
+                          </div>
+                          <div style={{ overflowWrap: 'anywhere' }}>{renderEmotionTaggedContent(String(log.content || ''))}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </div>
+            )}
+          </main>
+        ) : activeTab === 'domain' ? (
           <>
             <aside style={{ borderRight: '1px solid #ddd', paddingRight: '20px' }}>
               <h3>ドメイン一覧</h3>
@@ -6400,7 +6754,7 @@ export default function AdminPage() {
                           <div style={{ fontSize: '11px', opacity: 0.75, marginBottom: '6px' }}>
                             {message.role === 'user' ? 'あなた' : '応答'} ・ {formatAdminTimestamp(message.createdAt)}
                           </div>
-                          <div>{message.content}</div>
+                          <div>{renderEmotionTaggedContent(message.content)}</div>
                         </div>
                       ))
                     )}
@@ -6766,7 +7120,7 @@ export default function AdminPage() {
                               {formatAdminTimestamp(log.createdAt)}
                             </div>
                             <div style={{ fontWeight: 600, marginBottom: '8px', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                              {log.content}
+                              {renderEmotionTaggedContent(log.content)}
                             </div>
                             <div style={{ display: 'grid', gap: '4px', color: '#475569', fontSize: '13px' }}>
                               <div>historyId: {log.historyId}</div>

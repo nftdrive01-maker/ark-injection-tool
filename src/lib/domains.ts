@@ -7,7 +7,11 @@
 import fs from 'fs';
 import path from 'path';
 import { type PronunciationRule, getAllPronunciationRules, setAllPronunciationRules } from './pronunciations';
+import { type PronunciationSettings, getPronunciationSettings, updatePronunciationSettings } from './pronunciation-settings';
 import { type DomainAccessUser, normalizeStoredAccessUsers } from './domain-access-auth';
+import { type GuideDeck, getAllGuides, replaceAllGuides } from './guides';
+import { type MCPServer, getAllMCPServers, replaceAllMCPServers } from './mcp-servers';
+import { type PublicManagementSettings, getPublicManagementSettings, updatePublicManagementSettings } from './public-management';
 
 export interface Knowledge {
   id: string;
@@ -98,6 +102,10 @@ export interface FullBackupData {
     chronicles: Chronicle[];
   };
   pronunciations?: PronunciationRule[];
+  pronunciationSettings?: PronunciationSettings;
+  guides?: GuideDeck[];
+  mcpServers?: MCPServer[];
+  publicSettings?: PublicManagementSettings;
 }
 
 const DOMAINS_CONFIG_PATH = process.env.INJECTION_DOMAINS_CONFIG || './data/domains.json';
@@ -973,6 +981,10 @@ export function initializeDefaultDomains(): void {
 export function exportFullBackup(): FullBackupData {
   const store = loadStoreFromFile();
   const pronunciations = getAllPronunciationRules();
+  const pronunciationSettings = getPronunciationSettings();
+  const guides = getAllGuides();
+  const mcpServers = getAllMCPServers();
+  const publicSettings = getPublicManagementSettings();
   return {
     exportedAt: new Date().toISOString(),
     version: '1.0.0',
@@ -982,6 +994,10 @@ export function exportFullBackup(): FullBackupData {
       chronicles: store.chronicles,
     },
     pronunciations,
+    pronunciationSettings,
+    guides,
+    mcpServers,
+    publicSettings,
   };
 }
 
@@ -997,12 +1013,20 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
       chronicles?: Array<Partial<Chronicle>>;
     };
     pronunciations?: Array<Partial<PronunciationRule>>;
+    pronunciationSettings?: Partial<PronunciationSettings>;
+    guides?: Array<Partial<GuideDeck>>;
+    mcpServers?: Array<Partial<MCPServer>>;
+    publicSettings?: Partial<PublicManagementSettings>;
   };
 
   const knowledgesRaw = candidate.store?.knowledges;
   const domainsRaw = candidate.store?.domains;
   const chroniclesRaw = candidate.store?.chronicles;
   const pronunciationsRaw = candidate.pronunciations;
+  const pronunciationSettingsRaw = candidate.pronunciationSettings;
+  const guidesRaw = candidate.guides;
+  const mcpServersRaw = candidate.mcpServers;
+  const publicSettingsRaw = candidate.publicSettings;
 
   if (!Array.isArray(knowledgesRaw) || !Array.isArray(domainsRaw)) {
     return { ok: false, error: 'バックアップに store.knowledges / store.domains が必要です' };
@@ -1036,6 +1060,9 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
     name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : `Domain ${index + 1}`,
     description: typeof item.description === 'string' ? item.description : '',
     enabled: typeof item.enabled === 'boolean' ? item.enabled : true,
+    sharedLogEnabled: typeof item.sharedLogEnabled === 'boolean' ? item.sharedLogEnabled : false,
+    accessControlEnabled: typeof item.accessControlEnabled === 'boolean' ? item.accessControlEnabled : false,
+    accessUsers: normalizeStoredAccessUsers(item.accessUsers),
     baseSystemPrompt: typeof item.baseSystemPrompt === 'string' ? item.baseSystemPrompt : '',
     baseContext: typeof item.baseContext === 'string' ? item.baseContext : '',
     bgUrl: typeof item.bgUrl === 'string' ? item.bgUrl : undefined,
@@ -1053,6 +1080,14 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
     minTimeIntervalSec: typeof item.minTimeIntervalSec === 'number' ? item.minTimeIntervalSec : undefined,
     maxTimeIntervalSec: typeof item.maxTimeIntervalSec === 'number' ? item.maxTimeIntervalSec : undefined,
     timeToSleepSec: typeof item.timeToSleepSec === 'number' ? item.timeToSleepSec : undefined,
+    gazeWakeEnabled: typeof item.gazeWakeEnabled === 'boolean' ? item.gazeWakeEnabled : undefined,
+    gazeHoldMs: typeof item.gazeHoldMs === 'number' ? item.gazeHoldMs : undefined,
+    gazeReleaseMs: typeof item.gazeReleaseMs === 'number' ? item.gazeReleaseMs : undefined,
+    gazeCooldownMs: typeof item.gazeCooldownMs === 'number' ? item.gazeCooldownMs : undefined,
+    gazeGreetings: Array.isArray(item.gazeGreetings)
+      ? item.gazeGreetings.filter((greeting): greeting is string => typeof greeting === 'string')
+      : undefined,
+    gazeDebugUiEnabled: typeof item.gazeDebugUiEnabled === 'boolean' ? item.gazeDebugUiEnabled : undefined,
     imageAvatarIdleUrl: typeof item.imageAvatarIdleUrl === 'string' ? item.imageAvatarIdleUrl : undefined,
     imageAvatarTalkUrl: typeof item.imageAvatarTalkUrl === 'string' ? item.imageAvatarTalkUrl : undefined,
     imageAvatarTalkIntervalMs: typeof item.imageAvatarTalkIntervalMs === 'number' ? item.imageAvatarTalkIntervalMs : undefined,
@@ -1156,6 +1191,27 @@ export function importFullBackup(input: unknown): { ok: boolean; error?: string 
           updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
         }));
       setAllPronunciationRules(restoredRules);
+    }
+
+    if (pronunciationSettingsRaw && typeof pronunciationSettingsRaw === 'object') {
+      updatePronunciationSettings({
+        wanaKanaEnabled:
+          typeof pronunciationSettingsRaw.wanaKanaEnabled === 'boolean'
+            ? pronunciationSettingsRaw.wanaKanaEnabled
+            : undefined,
+      });
+    }
+
+    if (Array.isArray(guidesRaw)) {
+      replaceAllGuides(guidesRaw);
+    }
+
+    if (Array.isArray(mcpServersRaw)) {
+      replaceAllMCPServers(mcpServersRaw);
+    }
+
+    if (publicSettingsRaw && typeof publicSettingsRaw === 'object') {
+      updatePublicManagementSettings(publicSettingsRaw);
     }
 
     return { ok: true };

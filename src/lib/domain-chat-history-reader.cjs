@@ -79,14 +79,22 @@ async function main() {
     }
     countStmt.free();
 
+    const userFilterParts = ['user_id IS NOT NULL'];
+    const userFilterValues = [];
+
+    if (domainId) {
+      userFilterParts.unshift('domain_id = ?');
+      userFilterValues.push(domainId);
+    }
+
     const userStmt = db.prepare(
       `SELECT DISTINCT user_id
-       FROM domain_chat_history${domainId ? ' WHERE domain_id = ?' : ''}
-       AND user_id IS NOT NULL`
-        .replace('FROM domain_chat_history AND', 'FROM domain_chat_history WHERE')
+       FROM domain_chat_history
+       WHERE ${userFilterParts.join(' AND ')}
+       ORDER BY user_id ASC`
     );
-    if (domainId) {
-      userStmt.bind([domainId]);
+    if (userFilterValues.length > 0) {
+      userStmt.bind(userFilterValues);
     }
 
     const availableUserIds = [];
@@ -111,16 +119,14 @@ async function main() {
       sessionFilterValues.push(userId);
     }
 
-    const sessionWhereClause = sessionFilterParts.length > 0
-      ? ` WHERE ${sessionFilterParts.join(' AND ')}`
-      : '';
+    sessionFilterParts.push('session_id IS NOT NULL');
+
+    const sessionWhereClause = ` WHERE ${sessionFilterParts.join(' AND ')}`;
 
     const sessionStmt = db.prepare(
       `SELECT DISTINCT session_id
        FROM domain_chat_history${sessionWhereClause}
-       AND session_id IS NOT NULL
        ORDER BY session_id DESC`
-        .replace('FROM domain_chat_history AND', 'FROM domain_chat_history WHERE')
     );
     if (sessionFilterValues.length > 0) {
       sessionStmt.bind(sessionFilterValues);

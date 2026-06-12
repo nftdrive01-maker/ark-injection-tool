@@ -785,6 +785,24 @@ export function getAllMCPServers(): MCPServer[] {
   return sortMCPServers(withPresetMCPServers(store.servers));
 }
 
+export function replaceAllMCPServers(input: unknown): MCPServer[] {
+  const rawServers = Array.isArray(input) ? input : [];
+  const servers = rawServers
+    .filter((server): server is MCPServer => Boolean(server && typeof server === 'object'))
+    .map((server) => normalizeMCPServer(server));
+  const seenIds = new Set<string>();
+
+  for (const server of servers) {
+    if (!server.id || seenIds.has(server.id)) {
+      throw new Error(`MCPサーバーIDが重複または不正です: ${server.id || '(empty)'}`);
+    }
+    seenIds.add(server.id);
+  }
+
+  writeStoreToFile({ servers });
+  return getAllMCPServers();
+}
+
 /**
  * 指定IDのMCPサーバーを取得
  */

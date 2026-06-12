@@ -224,6 +224,24 @@ export function getAllGuides(): GuideDeck[] {
   return ensureStore().guides;
 }
 
+export function replaceAllGuides(input: unknown): GuideDeck[] {
+  const rawGuides = Array.isArray(input) ? input : [];
+  const guides = rawGuides.length > 0
+    ? rawGuides.map((guide, index) => normalizeGuide(guide, index))
+    : [DEFAULT_GUIDE];
+  const seenIds = new Set<string>();
+
+  for (const guide of guides) {
+    if (seenIds.has(guide.deck_id)) {
+      throw new Error(`ガイドIDが重複しています: ${guide.deck_id}`);
+    }
+    seenIds.add(guide.deck_id);
+  }
+
+  writeStore({ guides });
+  return guides;
+}
+
 export function getGuideById(id: string): GuideDeck | null {
   return getAllGuides().find((guide) => guide.deck_id === id) || null;
 }
