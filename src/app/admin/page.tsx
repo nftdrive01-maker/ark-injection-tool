@@ -856,6 +856,59 @@ function sanitizeDownloadLabel(value: string): string {
   return value.trim().replace(/[\\/:*?"<>|\s]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
+function escapeCsvCell(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function buildSharedLogsCsv(items: SharedLogEntry[], domain: Domain): string {
+  const headers = [
+    'historyId',
+    'domainId',
+    'domainName',
+    'userId',
+    'role',
+    'createdAt',
+    'createdAtDayKey',
+    'sessionId',
+    'content',
+    'dbResultTitle',
+    'dbResultSourceName',
+    'dbResultToolName',
+    'dbResultSummary',
+    'mcpUsed',
+    'mcpServerId',
+    'mcpToolName',
+  ];
+
+  const rows = items.map((item) => [
+    item.historyId,
+    item.domainId,
+    domain.name || domain.id,
+    item.userId || '',
+    item.role,
+    formatAdminTimestamp(getDashboardTimestamp(item.createdAt)),
+    getDashboardDayKey(item),
+    item.sessionId || '',
+    item.content || '',
+    item.dbResult?.title || '',
+    item.dbResult?.sourceName || '',
+    item.dbResult?.toolName || '',
+    item.dbResult?.summary || '',
+    item.mcpInfo?.used ? 'true' : 'false',
+    item.mcpInfo?.serverId || '',
+    item.mcpInfo?.toolName || '',
+  ]);
+
+  return [headers, ...rows]
+    .map((row) => row.map(escapeCsvCell).join(','))
+    .join('\r\n');
+}
+
 function normalizeAdminDomain(domain: Domain): Domain {
   return {
     ...domain,
@@ -929,7 +982,7 @@ export default function AdminPage() {
   const [sharedLogsError, setSharedLogsError] = useState('');
   const [sharedLogsTotal, setSharedLogsTotal] = useState(0);
   const [sharedLogsLimit, setSharedLogsLimit] = useState(50);
-  const [sharedLogDownloadBusy, setSharedLogDownloadBusy] = useState(false);
+  const [sharedLogDownloadFormat, setSharedLogDownloadFormat] = useState<'json' | 'csv' | null>(null);
   const [clearingSharedLogs, setClearingSharedLogs] = useState(false);
   const [sharedLogFilterDomainId, setSharedLogFilterDomainId] = useState('');
   const [sharedLogFilterUserId, setSharedLogFilterUserId] = useState(SHARED_LOG_ALL_USERS);
@@ -4529,7 +4582,7 @@ export default function AdminPage() {
     }
   };
 
-  const handleDownloadSharedLogs = async () => {
+  const handleDownloadSharedLogs = async (format: 'json' | 'csv' = 'json') => {
     if (!selectedDomain?.id) {
       setMessage('保存対象のドメインが選択されていません');
       setTimeout(() => setMessage(''), 3000);
@@ -4537,7 +4590,7 @@ export default function AdminPage() {
     }
 
     try {
-      setSharedLogDownloadBusy(true);
+      setSharedLogDownloadFormat(format);
       setMessage('');
       const token = localStorage.getItem('injection_token');
       if (!token) {
@@ -4587,39 +4640,45 @@ export default function AdminPage() {
         .filter(Boolean)
         .join('-');
 
-      const exportPayload = {
-        exportedAt: new Date().toISOString(),
-        filters: {
-          domainId: selectedDomain.id,
-          domainName: selectedDomain.name || null,
-          userId: null,
-          sessionId: null,
-          allLogsForSelectedDomain: true,
-          limit: null,
-          loadedCount: items.length,
-          totalCount: typeof payload?.totalCount === 'number' ? payload.totalCount : items.length,
-        },
-        items,
-      };
-
-      const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
+      const blob = format === 'csv'
+        ? new Blob([`\ufeff${buildSharedLogsCsv(items, selectedDomain)}`], { type: 'text/csv;charset=utf-8' })
+        : new Blob([
+            JSON.stringify(
+              {
+                exportedAt: new Date().toISOString(),
+                filters: {
+                  domainId: selectedDomain.id,
+                  domainName: selectedDomain.name || null,
+                  userId: null,
+                  sessionId: null,
+                  allLogsForSelectedDomain: true,
+                  limit: null,
+                  loadedCount: items.length,
+                  totalCount: typeof payload?.totalCount === 'number' ? payload.totalCount : items.length,
+                },
+                items,
+              },
+              null,
+              2,
+            ),
+          ], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${fileName}.json`;
+      link.download = `${fileName}.${format}`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      setMessage(`選択中ドメインの共有ログを ${items.length} 件保存しました`);
+      setMessage(`選択中ドメインの共有ログを ${items.length} 件${format.toUpperCase()}保存しました`);
       setTimeout(() => setMessage(''), 3000);
     } catch (error) {
       console.error('Shared log download error:', error);
       setMessage('共有ログの保存時にエラーが発生しました');
       setTimeout(() => setMessage(''), 3000);
     } finally {
-      setSharedLogDownloadBusy(false);
+      setSharedLogDownloadFormat(null);
     }
   };
 
@@ -7022,19 +7081,36 @@ export default function AdminPage() {
 
                 <button
                   type="button"
-                  onClick={handleDownloadSharedLogs}
-                  disabled={sharedLogDownloadBusy || !selectedDomain?.id}
+                  onClick={() => handleDownloadSharedLogs('json')}
+                  disabled={sharedLogDownloadFormat !== null || !selectedDomain?.id}
                   style={{
                     padding: '10px 12px',
-                    backgroundColor: sharedLogDownloadBusy || !selectedDomain?.id ? '#ccc' : '#0f766e',
+                    backgroundColor: sharedLogDownloadFormat !== null || !selectedDomain?.id ? '#ccc' : '#0f766e',
                     color: 'white',
                     border: 'none',
                     borderRadius: '4px',
-                    cursor: sharedLogDownloadBusy || !selectedDomain?.id ? 'default' : 'pointer',
+                    cursor: sharedLogDownloadFormat !== null || !selectedDomain?.id ? 'default' : 'pointer',
                     fontWeight: 'bold',
                   }}
                 >
-                  {sharedLogDownloadBusy ? '保存中...' : '選択ドメイン全件JSON保存'}
+                  {sharedLogDownloadFormat === 'json' ? 'JSON保存中...' : '選択ドメイン全件JSON保存'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDownloadSharedLogs('csv')}
+                  disabled={sharedLogDownloadFormat !== null || !selectedDomain?.id}
+                  style={{
+                    padding: '10px 12px',
+                    backgroundColor: sharedLogDownloadFormat !== null || !selectedDomain?.id ? '#ccc' : '#2563eb',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: sharedLogDownloadFormat !== null || !selectedDomain?.id ? 'default' : 'pointer',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {sharedLogDownloadFormat === 'csv' ? 'CSV保存中...' : '選択ドメイン全件CSV保存'}
                 </button>
 
                 <button
@@ -7415,8 +7491,8 @@ export default function AdminPage() {
                     <textarea
                       value={selectedKnowledge.description}
                       onChange={(e) => setSelectedKnowledge({ ...selectedKnowledge, description: e.target.value })}
-                      rows={2}
-                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box' }}
+                      rows={4}
+                      style={{ width: '100%', minHeight: '88px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box', lineHeight: 1.6, resize: 'vertical' }}
                     />
                   </div>
 
@@ -7425,8 +7501,8 @@ export default function AdminPage() {
                     <textarea
                       value={selectedKnowledge.systemPrompt}
                       onChange={(e) => setSelectedKnowledge({ ...selectedKnowledge, systemPrompt: e.target.value })}
-                      rows={4}
-                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                      rows={10}
+                      style={{ width: '100%', minHeight: '220px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box', fontFamily: 'monospace', lineHeight: 1.55, resize: 'vertical' }}
                     />
                   </div>
 
@@ -7435,8 +7511,8 @@ export default function AdminPage() {
                     <textarea
                       value={selectedKnowledge.context}
                       onChange={(e) => setSelectedKnowledge({ ...selectedKnowledge, context: e.target.value })}
-                      rows={4}
-                      style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                      rows={12}
+                      style={{ width: '100%', minHeight: '260px', padding: '8px', border: '1px solid #ddd', borderRadius: '4px', boxSizing: 'border-box', fontFamily: 'monospace', lineHeight: 1.55, resize: 'vertical' }}
                     />
                   </div>
 
